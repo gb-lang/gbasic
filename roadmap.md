@@ -45,6 +45,28 @@ It's a **guided path through the machine** with training wheels that come off pr
 
 ## Part 2: Strategic Architecture Decisions
 
+### Decision 0: Compiler Implementation Language
+
+**The compiler itself must be written in something.** This decision affects hiring, iteration speed, LLVM integration ergonomics, and long-term maintainability.
+
+**Options:**
+
+| Language | LLVM Integration | Pros | Cons |
+|----------|-----------------|------|------|
+| **C++** | Native (LLVM is C++) | Zero-friction LLVM API access, direct use of libclang/TableGen, largest pool of compiler engineers | Slow iteration, memory bugs, complex build systems |
+| **Rust** | Via `inkwell` or `llvm-sys` crate | Memory safety, strong type system, good Wasm tooling (Cranelift fallback is native Rust), growing compiler community | LLVM bindings lag behind upstream, steeper learning curve for contributors |
+| **Zig** | Via C interop (LLVM is bundled in Zig's toolchain) | Simple language, fast compilation, C interop is trivial, small binary output | Smaller ecosystem, fewer compiler engineers available, language still maturing |
+| **Go** | Via `tinygo/llvm` or CGo bindings | Fast iteration, simple concurrency for LSP server, easy onboarding | CGo overhead, poor LLVM ergonomics, GC adds latency to compiler itself |
+
+**Recommended: Rust**
+- `inkwell` provides a safe, idiomatic wrapper over the LLVM C API
+- The LSP server, CLI tooling, and compiler can share a single codebase
+- Cranelift (Rust-native) serves as a realistic fallback backend
+- Cargo ecosystem provides testing, benchmarking, and fuzzing tooling out of the box
+- Tauri (Phase 2 IDE) is also Rust, enabling code sharing between compiler and IDE shell
+
+**If Rust proves too slow to iterate on:** Fall back to C++ with sanitizers enabled, using LLVM's native APIs directly.
+
 ### Decision 1: Language Core (Reuse Foundation)
 
 **Don't reinvent:** Parser generators, type systems, intermediate representations
@@ -59,6 +81,11 @@ It's a **guided path through the machine** with training wheels that come off pr
 - **Desktop:** LLVM → x86-64/ARM native code, link with SDL2 runtime → native executable
 - **Web:** LLVM → WebAssembly, JavaScript glue, PixiJS/Web Audio API → HTML + JS + Wasm bundle
 - Custom parser/frontend for G-Basic syntax; namespace API maps to IR, backends implement platform runtimes
+
+**Parser strategy: Hand-written recursive descent (not ANTLR)**
+- A teaching language lives or dies by its error messages. Hand-written parsers allow full control over error recovery, context-aware suggestions ("Did you forget `.Draw()` at the end of your chain?"), and span tracking for precise diagnostics.
+- Languages that prioritize developer experience (Go, Rust, Swift, V) all use hand-written parsers for this reason.
+- Trade-off: More upfront work (~2-4 weeks vs ~1 week for ANTLR), but pays for itself immediately in error quality.
 
 **Timeline impact:** 6-9 months saved vs building IR + optimizer from scratch
 
@@ -577,7 +604,98 @@ Sound.Effect("jump").Play()
 
 ---
 
-## Part 9: Critical Path
+## Part 9: Developer Experience Gaps (Previously Missing)
+
+### Debugging Story
+
+The roadmap must address how users debug programs. Without a debugger, beginners will hit walls and abandon the language.
+
+**Strategy: Two-tier debugging**
+
+**Tier 1: Built-in diagnostic tools (Day 1)**
+- `System.Log(value)` — prints any value with type info to a debug console
+- `System.Inspect(namespace)` — dumps namespace state (e.g., `System.Inspect(Screen)` shows all layers, sprites, positions)
+- `System.Slow(0.5)` — runs program at half speed so beginners can see what's happening
+- `Memory.Stats()` — already in the roadmap, shows allocations/GC activity
+- Visual overlay: `System.Debug(true)` draws sprite bounding boxes, layer boundaries, FPS counter
+
+**Tier 2: VS Code debug adapter (Month 10+)**
+- Implement DAP (Debug Adapter Protocol) in the LSP server
+- LLVM can emit DWARF debug info (desktop) — map source locations to IR via `DIBuilder`
+- Wasm target: use Chrome DevTools protocol or source maps
+- Breakpoints, step-through, variable inspection, call stack
+- Custom debug visualizers for namespace objects (show a sprite's texture inline, play a Sound inline)
+
+**Teaching moment:** "A debugger lets you freeze time and look inside your program"
+
+### Hot Reload
+
+For a language promising "immediate visual feedback," compile-edit-restart is too slow. Users should see changes reflected live.
+
+**Implementation approach:**
+
+```
+┌──────────────┐     ┌────────────────┐     ┌──────────────┐
+│ File watcher  │────▶│ Incremental    │────▶│ Runtime      │
+│ (notify/      │     │ recompile      │     │ hot-swap     │
+│  chokidar)    │     │ (changed fn    │     │ (patch fn    │
+│               │     │  only)         │     │  pointers)   │
+└──────────────┘     └────────────────┘     └──────────────┘
+```
+
+- **Desktop:** Recompile changed functions to shared library (.dylib/.so/.dll), `dlopen`/`dlsym` to swap function pointers at runtime. State (sprites, sounds, variables) survives the reload.
+- **Web:** Recompile changed module to Wasm, use `WebAssembly.instantiate()` to swap. PixiJS scene graph persists.
+- **Scope:** Only function bodies hot-reload. Struct/type changes require full restart (with clear message explaining why).
+- **Fallback:** If hot reload is too complex for v1.0, implement fast-restart instead — full recompile but restore program state from a snapshot.
+
+**Timeline:** Prototype in Month 8, stable by Month 12.
+
+### Code Sharing & Imports
+
+The roadmap specifies single-file execution, but users will eventually want to split code and share it.
+
+**Phase 1 (v1.0): Local imports only**
+```
+import "enemies.gb"        # Relative path, merged into compilation
+import "utils/helpers.gb"  # Subdirectory
+```
+- No package manager, no registry, no versioning
+- The compiler resolves imports as additional source files in the same compilation unit
+- Teaching moment: "Your program can be split across files — they're stitched together before compiling"
+
+**Phase 2 (v2.0+): Package registry**
+- Central registry (like crates.io or npm) for community libraries
+- `gbasic.toml` manifest file for multi-file projects
+- Semantic versioning, dependency resolution
+- **Only pursue this if adoption metrics justify it** — premature package management adds complexity without value for beginners
+
+### Compiler Testing & Quality
+
+A teaching language compiler must be exceptionally reliable. Bugs in the compiler destroy trust.
+
+**Testing strategy:**
+
+| Layer | Approach | Tooling |
+|-------|----------|---------|
+| **Lexer/Parser** | Snapshot tests — input source → expected AST | `insta` (Rust) or custom harness |
+| **Type checker** | Positive + negative cases, expected error messages | Same harness |
+| **IR generation** | FileCheck-style tests — verify LLVM IR patterns | LLVM `FileCheck` or `lit` |
+| **End-to-end** | `.gb` source → compile → run → assert stdout/exit code | Custom test runner |
+| **Error messages** | Golden file tests — exact error output comparison | Snapshot testing |
+| **Fuzzing** | Random/mutated source → compiler must not crash | `cargo-fuzz` / `libFuzzer` |
+| **Performance** | Compile-time and runtime benchmarks, tracked over time | `criterion` + CI dashboard |
+
+**Minimum bar for any release:**
+- Zero compiler crashes on valid input
+- Zero compiler crashes on invalid input (must always produce an error message)
+- All example programs compile and run correctly on both targets
+- Error messages tested against golden files to prevent regressions
+
+**CI pipeline:** Every PR runs full test suite on Linux + macOS + Windows. Web target tested via headless Chromium.
+
+---
+
+## Part 10: Critical Path (Updated)
 
 **Longest poles:**
 
@@ -602,7 +720,7 @@ Sound.Effect("jump").Play()
 
 ---
 
-## Part 10: Bottom Line
+## Part 11: Bottom Line
 
 ### What We're Building
 A **teaching-first systems language** that makes machine behavior visible and efficient code natural, bundled with professional assets and an integrated IDE.

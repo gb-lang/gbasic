@@ -1,0 +1,13 @@
+[package]
+name = "gbasic-irgen"
+version.workspace = true
+edition.workspace = true
+
+[features]
+default = ["llvm"]
+llvm = ["inkwell"]
+
+[dependencies]
+gbasic-common = { path = "../common" }
+gbasic-typechecker = { path = "../typechecker" }
+inkwell = { workspace = true, optional = true }

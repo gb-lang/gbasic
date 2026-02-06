@@ -1,0 +1,12 @@
+[package]
+name = "gbasic-lexer"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+gbasic-common = { path = "../common" }
+logos.workspace = true
+unicode-xid.workspace = true
+
+[dev-dependencies]
+insta.workspace = true

@@ -1,0 +1,38 @@
+[workspace]
+resolver = "2"
+members = [
+    "compiler/common",
+    "compiler/lexer",
+    "compiler/parser",
+    "compiler/typechecker",
+    "compiler/irgen",
+    "compiler/cli",
+    "runtime/desktop",
+    "runtime/web",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+repository = "https://github.com/gbasic/gbasic"
+
+[workspace.dependencies]
+# Compiler
+thiserror = "2"
+serde = { version = "1", features = ["derive"] }
+logos = "0.15"
+unicode-xid = "0.2"
+codespan-reporting = "0.11"
+indexmap = "2"
+inkwell = { version = "0.5", features = ["llvm18-0"] }
+clap = { version = "4", features = ["derive"] }
+colored = "3"
+
+# Testing
+insta = { version = "1", features = ["yaml"] }
+
+# Runtime
+sdl2 = { version = "0.37", features = ["bundled"] }
+wasm-bindgen = "0.2"
+web-sys = "0.3"

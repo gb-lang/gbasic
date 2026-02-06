@@ -1,0 +1,23 @@
+// G-Basic basics: variables, interpolation, functions, control flow
+
+let name = "World"
+print("Hello, {name}!")
+
+let x = 10
+let y = 20
+print("{x} + {y} = {x + y}")
+
+fn greet(who: String) {
+    print("Welcome, {who}!")
+}
+greet("G-Basic")
+
+let numbers = [1, 2, 3, 4, 5]
+for n in numbers {
+    if n % 2 == 0 {
+        print("{n} is even")
+    }
+}
+
+// Namespaces are for hardware
+Screen.Layer(0).Clear(30, 60, 180).Draw()

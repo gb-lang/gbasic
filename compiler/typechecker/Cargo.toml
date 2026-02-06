@@ -1,0 +1,9 @@
+[package]
+name = "gbasic-typechecker"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+gbasic-common = { path = "../common" }
+gbasic-parser = { path = "../parser" }
+indexmap.workspace = true

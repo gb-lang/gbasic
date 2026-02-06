@@ -1,0 +1,11 @@
+[package]
+name = "gbasic-runtime-web"
+version.workspace = true
+edition.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+wasm-bindgen.workspace = true
+web-sys = { workspace = true, features = ["Window", "Document", "HtmlCanvasElement", "CanvasRenderingContext2d"] }

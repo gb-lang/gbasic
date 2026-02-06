@@ -1,0 +1,12 @@
+[package]
+name = "gbasic-parser"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+gbasic-common = { path = "../common" }
+gbasic-lexer = { path = "../lexer" }
+codespan-reporting.workspace = true
+
+[dev-dependencies]
+insta.workspace = true

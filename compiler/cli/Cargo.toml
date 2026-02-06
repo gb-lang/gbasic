@@ -1,0 +1,17 @@
+[package]
+name = "gbasic"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "gbasic"
+path = "src/main.rs"
+
+[dependencies]
+gbasic-common = { path = "../common" }
+gbasic-lexer = { path = "../lexer" }
+gbasic-parser = { path = "../parser" }
+gbasic-typechecker = { path = "../typechecker" }
+gbasic-irgen = { path = "../irgen", default-features = false }
+clap.workspace = true
+colored.workspace = true

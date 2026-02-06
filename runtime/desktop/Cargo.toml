@@ -1,0 +1,10 @@
+[package]
+name = "gbasic-runtime-desktop"
+version.workspace = true
+edition.workspace = true
+
+[lib]
+crate-type = ["staticlib", "cdylib"]
+
+[dependencies]
+sdl2.workspace = true

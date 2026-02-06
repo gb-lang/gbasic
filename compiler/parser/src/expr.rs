@@ -29,7 +29,7 @@ impl Parser {
 
     fn parse_or(&mut self) -> Result<Expression, GBasicError> {
         let mut left = self.parse_and()?;
-        while matches!(self.current(), Token::PipePipe) {
+        while matches!(self.current(), Token::PipePipe | Token::Or) {
             self.advance();
             let right = self.parse_and()?;
             let span = left.span().merge(right.span());
@@ -45,7 +45,7 @@ impl Parser {
 
     fn parse_and(&mut self) -> Result<Expression, GBasicError> {
         let mut left = self.parse_equality()?;
-        while matches!(self.current(), Token::AmpAmp) {
+        while matches!(self.current(), Token::AmpAmp | Token::And) {
             self.advance();
             let right = self.parse_equality()?;
             let span = left.span().merge(right.span());
@@ -151,7 +151,7 @@ impl Parser {
 
     fn parse_unary(&mut self) -> Result<Expression, GBasicError> {
         match self.current() {
-            Token::Bang => {
+            Token::Bang | Token::Not => {
                 let start = self.current_span();
                 self.advance();
                 let operand = self.parse_unary()?;

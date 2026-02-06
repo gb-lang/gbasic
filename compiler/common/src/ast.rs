@@ -76,7 +76,7 @@ pub struct FunctionDecl {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Parameter {
     pub name: Identifier,
-    pub type_ann: Type,
+    pub type_ann: Option<Type>,
     pub span: Span,
 }
 

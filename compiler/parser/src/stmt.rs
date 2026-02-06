@@ -9,7 +9,7 @@ impl Parser {
         self.skip_newlines();
         match self.current() {
             Token::Let => self.parse_let(),
-            Token::Fn => self.parse_fn(),
+            Token::Fun | Token::Fn => self.parse_fn(),
             Token::If => self.parse_if(),
             Token::For => self.parse_for(),
             Token::While => self.parse_while(),
@@ -335,8 +335,12 @@ impl Parser {
 
     fn parse_param(&mut self) -> Result<Parameter, GBasicError> {
         let name = self.parse_identifier()?;
-        self.expect(&Token::Colon)?;
-        let type_ann = self.parse_type()?;
+        let type_ann = if matches!(self.current(), Token::Colon) {
+            self.advance();
+            Some(self.parse_type()?)
+        } else {
+            None
+        };
         let span = name.span.merge(self.tokens[self.pos - 1].span);
         Ok(Parameter {
             name,

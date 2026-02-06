@@ -94,7 +94,8 @@ pub enum RawToken {
 pub enum Token {
     // Keywords
     Let,
-    Fn,
+    Fun, // primary keyword for functions
+    Fn,  // alias for fun
     If,
     Else,
     For,
@@ -106,6 +107,9 @@ pub enum Token {
     Continue,
     True,
     False,
+    And,
+    Or,
+    Not,
 
     // Namespaces
     Screen,
@@ -170,6 +174,7 @@ impl std::fmt::Display for Token {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Token::Let => write!(f, "let"),
+            Token::Fun => write!(f, "fun"),
             Token::Fn => write!(f, "fn"),
             Token::If => write!(f, "if"),
             Token::Else => write!(f, "else"),
@@ -182,6 +187,9 @@ impl std::fmt::Display for Token {
             Token::Continue => write!(f, "continue"),
             Token::True => write!(f, "true"),
             Token::False => write!(f, "false"),
+            Token::And => write!(f, "and"),
+            Token::Or => write!(f, "or"),
+            Token::Not => write!(f, "not"),
             Token::Screen => write!(f, "Screen"),
             Token::Sound => write!(f, "Sound"),
             Token::Input => write!(f, "Input"),
@@ -242,6 +250,7 @@ pub struct SpannedToken {
 fn classify_ident(s: &str) -> Token {
     match s {
         "let" => Token::Let,
+        "fun" => Token::Fun,
         "fn" => Token::Fn,
         "if" => Token::If,
         "else" => Token::Else,
@@ -254,6 +263,9 @@ fn classify_ident(s: &str) -> Token {
         "continue" => Token::Continue,
         "true" => Token::True,
         "false" => Token::False,
+        "and" => Token::And,
+        "or" => Token::Or,
+        "not" => Token::Not,
         "screen" => Token::Screen,
         "sound" => Token::Sound,
         "input" => Token::Input,

@@ -151,4 +151,31 @@ mod tests {
             ]
         );
     }
+
+    #[test]
+    fn test_fun_keyword() {
+        let tokens = tokenize("fun greet(name) { }");
+        assert_eq!(tokens[0].token, Token::Fun);
+    }
+
+    #[test]
+    fn test_and_or_not_keywords() {
+        let tokens = tokenize("x and y or not z");
+        let kinds: Vec<_> = tokens
+            .iter()
+            .map(|t| &t.token)
+            .filter(|t| !matches!(t, Token::Eof))
+            .collect();
+        assert_eq!(
+            kinds,
+            vec![
+                &Token::Ident("x".into()),
+                &Token::And,
+                &Token::Ident("y".into()),
+                &Token::Or,
+                &Token::Not,
+                &Token::Ident("z".into()),
+            ]
+        );
+    }
 }

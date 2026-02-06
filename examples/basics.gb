@@ -7,11 +7,30 @@ let x = 10
 let y = 20
 print("{x} + {y} = {x + y}")
 
-fn greet(who: String) {
+// Functions — no types needed!
+fun greet(who) {
     print("Welcome, {who}!")
 }
 greet("G-Basic")
 
+// Types are optional — add them when you're ready
+fun add(a: Int, b: Int) -> Int {
+    a + b
+}
+print("3 + 4 = {add(3, 4)}")
+
+// Natural-language logic
+let score = 15
+let alive = true
+if score > 10 and alive {
+    print("You win!")
+}
+
+if not alive {
+    print("Game over")
+}
+
+// Loops
 let numbers = [1, 2, 3, 4, 5]
 for n in numbers {
     if n % 2 == 0 {
@@ -19,5 +38,5 @@ for n in numbers {
     }
 }
 
-// Namespaces are for hardware
+// Namespaces for hardware
 Screen.Layer(0).Clear(30, 60, 180).Draw()

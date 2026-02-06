@@ -82,7 +82,7 @@ impl Parser {
         loop {
             match self.current() {
                 Token::Eof => return,
-                Token::Let | Token::Fn | Token::If | Token::For | Token::While
+                Token::Let | Token::Fun | Token::Fn | Token::If | Token::For | Token::While
                 | Token::Match | Token::Return | Token::Break | Token::Continue => return,
                 Token::RBrace => {
                     self.advance();
@@ -305,5 +305,65 @@ mod tests {
         if let Statement::Let { value, .. } = &program.statements[0] {
             assert!(matches!(value, Expression::Literal(Literal { kind: LiteralKind::String(_), .. })));
         }
+    }
+
+    #[test]
+    fn test_fun_keyword() {
+        let program = parse("fun greet(name) { }").unwrap();
+        assert_eq!(program.statements.len(), 1);
+        assert!(matches!(&program.statements[0], Statement::Function(_)));
+    }
+
+    #[test]
+    fn test_fn_still_works() {
+        let program = parse("fn add(a: Int, b: Int) -> Int { a + b }").unwrap();
+        assert!(matches!(&program.statements[0], Statement::Function(_)));
+    }
+
+    #[test]
+    fn test_optional_param_types() {
+        let program = parse("fun greet(who) { }").unwrap();
+        if let Statement::Function(f) = &program.statements[0] {
+            assert!(f.params[0].type_ann.is_none());
+        }
+    }
+
+    #[test]
+    fn test_mixed_param_types() {
+        let program = parse("fun foo(a, b: Int, c) { }").unwrap();
+        if let Statement::Function(f) = &program.statements[0] {
+            assert!(f.params[0].type_ann.is_none());
+            assert!(f.params[1].type_ann.is_some());
+            assert!(f.params[2].type_ann.is_none());
+        }
+    }
+
+    #[test]
+    fn test_and_or_keywords() {
+        let program = parse("if x > 0 and y < 10 { }").unwrap();
+        assert_eq!(program.statements.len(), 1);
+    }
+
+    #[test]
+    fn test_or_keyword() {
+        let program = parse("if a or b { }").unwrap();
+        if let Statement::If { condition, .. } = &program.statements[0] {
+            assert!(matches!(condition, Expression::BinaryOp { op: BinaryOp::Or, .. }));
+        }
+    }
+
+    #[test]
+    fn test_not_keyword() {
+        let program = parse("if not alive { }").unwrap();
+        if let Statement::If { condition, .. } = &program.statements[0] {
+            assert!(matches!(condition, Expression::UnaryOp { op: UnaryOp::Not, .. }));
+        }
+    }
+
+    #[test]
+    fn test_and_or_symbol_aliases() {
+        // && and || still work
+        let program = parse("if x && y || z { }").unwrap();
+        assert_eq!(program.statements.len(), 1);
     }
 }

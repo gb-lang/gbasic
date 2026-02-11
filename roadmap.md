@@ -304,6 +304,50 @@ System.Timer(5.0).OnComplete(callback).Start()
 #      Target     What happens         Terminal
 ```
 
+### Namespace Shortcut Aliases (Beginner On-Ramp)
+
+**Core principle:** Common operations have short-form aliases that are **parser-level sugar** desugaring to their full namespace method chains. The shortcut returns the same builder object, so chaining works transparently.
+
+**This is NOT a separate feature — it IS the namespace system**, just with a beginner-friendly entry point.
+
+```
+# Shortcut form (what beginners write)
+print("Hello!")                         # just works on day 1
+print("Score: {s}").Position(0, 32)     # chainable — same builder object
+random(1, 10)                           # quick math
+wait(2)                                 # pause without blocking
+
+# What the compiler actually sees (desugared in parser)
+Screen.Layer(0).Print("Hello!")
+Screen.Layer(0).Print("Score: {s}").Position(0, 32)
+Math.Random(1, 10)
+System.Wait(2)
+```
+
+**Alias table (initial set):**
+
+| Shortcut | Desugars To | Category |
+|----------|-------------|----------|
+| `print(args...)` | `Screen.Layer(0).Print(args...)` | Output |
+| `clear(r, g, b)` | `Screen.Layer(0).Clear(r, g, b)` | Screen |
+| `random(min, max)` | `Math.Random(min, max)` | Math |
+| `abs(x)` | `Math.Abs(x)` | Math |
+| `sqrt(x)` | `Math.Sqrt(x)` | Math |
+| `sin(x)` / `cos(x)` | `Math.Sin(x)` / `Math.Cos(x)` | Math |
+| `clamp(v, lo, hi)` | `Math.Clamp(v, lo, hi)` | Math |
+| `wait(secs)` | `System.Wait(secs)` | System |
+| `key(name)` | `Input.Keyboard.Key(name)` | Input |
+| `play(name)` | `Sound.Effect(name).Play()` | Sound |
+| `log(args...)` | `System.Log(args...)` | Debug |
+
+**Implementation rule:** Desugaring happens **once, in the parser**. The typechecker, codegen, and runtime never see shortcut names — only canonical `MethodChain` nodes. This prevents architectural drift: there is exactly one code path for namespace operations, whether the user wrote `print("hi")` or `Screen.Layer(0).Print("hi")`.
+
+**Teaching progression:**
+- Week 1: Use `print()`, `random()`, `wait()` — it just works
+- Week 2: Discover `Screen.Layer(0).Print()` — "oh, print goes to a screen layer!"
+- Week 3: Use `Screen.Layer(1).Print()` — "I can print to different layers!"
+- Week 4+: Build custom abstractions on top of the full namespace API
+
 ### Critical Teaching Moments Built Into Design
 
 **1. Memory visibility**

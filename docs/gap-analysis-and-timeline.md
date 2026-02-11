@@ -46,6 +46,7 @@
 | `codespan-reporting` in deps but never used for pretty errors | Medium | 3h |
 | No snapshot tests (insta in dev-deps but no snapshot files) | Medium | 2h |
 | Grammar doc doesn't mention `fun` keyword or `and/or/not` | Low | 0.5h |
+| **No namespace shortcut aliases** (`print()` → `Screen.Layer[0].Print()`) | **High** | 3h |
 
 ### 2.2 Type System & Type Checker — 0% Complete
 
@@ -168,20 +169,82 @@ Lexer has 9 tests, parser has 25+ tests. Nothing else is tested.
 | Standalone IDE (Tauri) | Month 21-22 | 40h+ | Skip |
 | Documentation & tutorials | Month 23-24 | 20h+ | Skip |
 
+### 2.9 Namespace Shortcut Aliases — 0% Complete (NEW — Core Design Feature)
+
+**Concept:** Common operations have short-form aliases that desugar to their full namespace method chains. The shortcut returns the same builder object, so chaining works transparently.
+
+```
+// Shortcut form (beginner-friendly)
+print("Hello!")                      // just works
+print("Score: {s}").position(0, 32)  // chainable!
+random(1, 10)                        // quick math
+wait(2)                              // pause
+
+// Equivalent full namespace form (what the compiler actually sees)
+Screen.Layer(0).Print("Hello!")
+Screen.Layer(0).Print("Score: {s}").Position(0, 32)
+Math.Random(1, 10)
+System.Wait(2)
+```
+
+**Why this matters:**
+1. `print("Hello!")` is the universal first-line experience — requiring `Screen.Layer[0].Print()` on day 1 is a wall
+2. Chainability is preserved because the desugared form is a normal `MethodChain`
+3. Teaching progression: beginners use `print()`, then discover it maps to `Screen.Layer(0).Print()` — teaches namespaces *organically*
+4. No magic: IDE/intellisense can show `print → Screen.Layer(0).Print` transparently
+5. Consistent with roadmap philosophy: "Training wheels that come off progressively"
+
+**Alias Table (initial set):**
+
+| Shortcut | Desugars To | Category |
+|----------|-------------|----------|
+| `print(args...)` | `Screen.Layer(0).Print(args...)` | Output |
+| `clear(r, g, b)` | `Screen.Layer(0).Clear(r, g, b)` | Screen |
+| `random(min, max)` | `Math.Random(min, max)` | Math |
+| `abs(x)` | `Math.Abs(x)` | Math |
+| `sqrt(x)` | `Math.Sqrt(x)` | Math |
+| `sin(x)` | `Math.Sin(x)` | Math |
+| `cos(x)` | `Math.Cos(x)` | Math |
+| `clamp(v, lo, hi)` | `Math.Clamp(v, lo, hi)` | Math |
+| `wait(secs)` | `System.Wait(secs)` | System |
+| `key(name)` | `Input.Keyboard.Key(name)` | Input |
+| `play(name)` | `Sound.Effect(name).Play()` | Sound |
+| `log(args...)` | `System.Log(args...)` | Debug |
+
+**Implementation strategy — Parser-level desugaring (3h):**
+
+1. Define alias table in `gbasic-common` as a static lookup (single source of truth)
+2. In `Parser::parse_postfix()`, after a `Call` is fully parsed:
+   - If callee is an `Identifier` matching an alias key, rewrite the `Call` + any trailing `.method()` chains into a unified `MethodChain` AST node
+   - The alias expansion prepends the implicit namespace prefix methods
+3. Downstream (typechecker, codegen, runtime) only ever sees canonical `MethodChain` — **zero impact**
+4. The alias table is extensible: adding new shortcuts is a one-line table entry
+
+**AST impact:** None — `MethodChain` already supports arbitrary chain length. The desugaring just constructs the prefix chain programmatically.
+
+**Chainability example — how `print("hi").position(0, 32)` parses:**
+```
+// Parser sees: Call(print, ["hi"]) . FieldAccess(position) . Call(position, [0, 32])
+// Desugars to: MethodChain {
+//   base: Screen,
+//   chain: [Layer(0), Print("hi"), Position(0, 32)]
+// }
+```
+
 ---
 
 ## 3. Total Effort Estimate
 
 | Area | Hours |
 |------|-------|
-| Frontend fixes/additions | ~13h |
+| Frontend fixes/additions (incl. shortcut aliases) | ~16h |
 | Type checker | ~35h |
 | IR generation | ~59h |
 | Desktop runtime | ~48h |
 | Web runtime | ~32h |
 | CLI | ~8h |
 | Testing | ~18h |
-| **Grand Total** | **~213h** |
+| **Grand Total** | **~216h** |
 
 With AI assistance (estimated 3-5x speedup on boilerplate-heavy tasks like codegen and runtime FFI), realistic AI-assisted effort: **~50-70h of human+AI pair programming**.
 
@@ -203,22 +266,25 @@ With AI assistance (estimated 3-5x speedup on boilerplate-heavy tasks like codeg
 
 ---
 
-### Day 1 (Mon): Type Checker Foundation + IR Scaffolding
+### Day 1 (Mon): Shortcut Aliases + Type Checker Foundation
 
 **Morning (4h):**
 - [ ] Add `Asset` namespace to lexer tokens, AST `NamespaceRef`, parser
+- [ ] Define shortcut alias table in `gbasic-common` (static lookup: name → namespace + prefix chain)
+- [ ] Implement parser-level desugaring in `parse_postfix()`: `print(x)` → `MethodChain { Screen, [Layer(0), Print(x)] }`
+- [ ] Handle trailing chains: `print(x).position(0, 32)` appends to the desugared `MethodChain`
+- [ ] Add parser tests: shortcut calls, shortcut + chaining, non-shortcut calls unaffected
+
+**Afternoon (4h):**
 - [ ] Implement symbol table with nested scopes in typechecker
 - [ ] Implement type inference for `let` bindings
 - [ ] Type check literals, identifiers, binary/unary ops
-
-**Afternoon (4h):**
 - [ ] Type check function declarations and calls
-- [ ] Register built-in `print` function
 - [ ] Type check assignment targets
 - [ ] Wire typechecker into CLI pipeline
 - [ ] Add 10+ typechecker tests (positive + negative)
 
-**Deliverable:** `gbasic hello.gb` runs typechecker and reports real type errors.
+**Deliverable:** `print("Hello!")` desugars to `Screen.Layer(0).Print("Hello!")` in AST. Typechecker reports real errors.
 
 ---
 
@@ -390,3 +456,4 @@ With AI assistance (estimated 3-5x speedup on boilerplate-heavy tasks like codeg
 4. **Namespaces:** Not real objects — they're syntax sugar. `Screen.Layer(1).Draw()` becomes `let h = runtime_screen_layer(1); runtime_screen_draw(h);`
 5. **Type checking:** Can be lenient for week 1. Focus on catching obvious errors (wrong arg count, type mismatches on operators). Full inference can wait.
 6. **Runtime ABI:** All runtime functions are `extern "C"` with simple types (i64, f64, *const u8, i32). No complex structs across FFI boundary.
+7. **Shortcut aliases:** `print()`, `random()`, `wait()`, etc. are **parser-level sugar** that desugar to `MethodChain` before typechecking. The alias table lives in `gbasic-common`. Downstream passes never see shortcuts — only canonical namespace forms. This is critical for preventing AI drift: every code path through typechecker/codegen/runtime only handles `MethodChain`, never special-cased builtins.

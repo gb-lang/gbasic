@@ -1,0 +1,23 @@
+// Sprite demo — load and move a sprite with arrow keys
+Screen.Init(800, 600)
+
+let sprite = Screen.SpriteLoad("assets/player.bmp")
+let x = 400.0
+let y = 300.0
+let speed = 5.0
+
+while true {
+    System.FrameBegin()
+
+    if Input.KeyPressed("up") { y = y - speed }
+    if Input.KeyPressed("down") { y = y + speed }
+    if Input.KeyPressed("left") { x = x - speed }
+    if Input.KeyPressed("right") { x = x + speed }
+
+    Screen.Clear(50, 50, 60)
+    Screen.SpriteAt(sprite, x, y)
+    Screen.SpriteDraw(sprite)
+    Screen.Present()
+
+    System.FrameEnd()
+}

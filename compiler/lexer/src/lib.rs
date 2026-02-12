@@ -178,4 +178,22 @@ mod tests {
             ]
         );
     }
+
+    #[test]
+    fn test_string_escape_newline() {
+        let tokens = tokenize(r#""hello\nworld""#);
+        match &tokens[0].token {
+            Token::String(s) => assert_eq!(s, "hello\nworld"),
+            other => panic!("expected String, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_string_escape_tab() {
+        let tokens = tokenize(r#""col1\tcol2""#);
+        match &tokens[0].token {
+            Token::String(s) => assert_eq!(s, "col1\tcol2"),
+            other => panic!("expected String, got {:?}", other),
+        }
+    }
 }

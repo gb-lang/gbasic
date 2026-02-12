@@ -6,6 +6,32 @@ fn to_lowercase(lex: &logos::Lexer<'_, RawToken>) -> String {
     lex.slice().to_ascii_lowercase()
 }
 
+/// Process escape sequences in a string literal.
+fn process_escapes(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars();
+    while let Some(c) = chars.next() {
+        if c == '\\' {
+            match chars.next() {
+                Some('n') => out.push('\n'),
+                Some('t') => out.push('\t'),
+                Some('\\') => out.push('\\'),
+                Some('"') => out.push('"'),
+                Some('{') => out.push('{'),
+                Some('}') => out.push('}'),
+                Some(other) => {
+                    out.push('\\');
+                    out.push(other);
+                }
+                None => out.push('\\'),
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
 /// Raw token produced by logos before keyword classification.
 #[derive(Logos, Debug, Clone, PartialEq)]
 #[logos(skip r"[ \t\r]+")]
@@ -21,7 +47,7 @@ pub enum RawToken {
 
     #[regex(r#""([^"\\]|\\.)*""#, |lex| {
         let s = lex.slice();
-        Some(s[1..s.len()-1].to_string())
+        Some(process_escapes(&s[1..s.len()-1]))
     })]
     String(String),
 
@@ -76,6 +102,8 @@ pub enum RawToken {
     RBracket,
     #[token(",")]
     Comma,
+    #[token("..")]
+    DotDot,
     #[token(".")]
     Dot,
     #[token(":")]
@@ -160,6 +188,7 @@ pub enum Token {
     LBracket,
     RBracket,
     Comma,
+    DotDot,
     Dot,
     Colon,
     Semicolon,
@@ -228,6 +257,7 @@ impl std::fmt::Display for Token {
             Token::LBracket => write!(f, "["),
             Token::RBracket => write!(f, "]"),
             Token::Comma => write!(f, ","),
+            Token::DotDot => write!(f, ".."),
             Token::Dot => write!(f, "."),
             Token::Colon => write!(f, ":"),
             Token::Semicolon => write!(f, ";"),
@@ -317,6 +347,7 @@ pub fn tokenize(source: &str) -> Vec<SpannedToken> {
                 RawToken::LBracket => Token::LBracket,
                 RawToken::RBracket => Token::RBracket,
                 RawToken::Comma => Token::Comma,
+                RawToken::DotDot => Token::DotDot,
                 RawToken::Dot => Token::Dot,
                 RawToken::Colon => Token::Colon,
                 RawToken::Semicolon => Token::Semicolon,

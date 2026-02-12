@@ -1,0 +1,57 @@
+// Test for-loop with range
+print("for loop:")
+for i in 0..5 {
+    print(i)
+}
+
+// Test for-loop with array
+print("array loop:")
+for x in [10, 20, 30] {
+    print(x)
+}
+
+// Test break
+print("break test:")
+let count = 0
+while true {
+    if count == 3 {
+        break
+    }
+    print(count)
+    count = count + 1
+}
+
+// Test continue
+print("continue test:")
+for i in 0..5 {
+    if i == 2 {
+        continue
+    }
+    print(i)
+}
+
+// Test match
+print("match test:")
+let val = 2
+match val {
+    1 -> { print("one") }
+    2 -> { print("two") }
+    3 -> { print("three") }
+    _ -> { print("other") }
+}
+
+// Test else-if
+print("else-if test:")
+let x = 15
+if x > 20 {
+    print("big")
+} else if x > 10 {
+    print("medium")
+} else {
+    print("small")
+}
+
+// Test string concat
+print("concat test:")
+let greeting = "hello" + " " + "world"
+print(greeting)

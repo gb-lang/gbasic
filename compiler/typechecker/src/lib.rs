@@ -143,16 +143,22 @@ impl TypeChecker {
                 body,
                 ..
             } => {
-                let _iter_ty = self.check_expression(iterable)?;
+                let iter_ty = self.check_expression(iterable)?;
+                let var_ty = match &iter_ty {
+                    Type::Array(inner) => *inner.clone(),
+                    _ => Type::Int, // Range produces Int
+                };
                 self.symbols.push_scope();
                 self.symbols.insert(
                     variable.name.clone(),
                     Symbol {
-                        ty: Type::Unknown,
-                        mutable: true,
+                        ty: var_ty,
+                        mutable: false,
                     },
                 );
-                self.check_block(body)?;
+                for s in &body.statements {
+                    self.check_statement(s)?;
+                }
                 self.symbols.pop_scope();
             }
             Statement::Return { value, .. } => {
@@ -164,9 +170,7 @@ impl TypeChecker {
                 self.check_expression(expr)?;
             }
             Statement::Block(block) => {
-                self.symbols.push_scope();
                 self.check_block(block)?;
-                self.symbols.pop_scope();
             }
             Statement::Match {
                 subject, arms, ..
@@ -351,6 +355,11 @@ impl TypeChecker {
                 self.check_expression(object)?;
                 Ok(Type::Unknown)
             }
+            Expression::Range { start, end, .. } => {
+                self.check_expression(start)?;
+                self.check_expression(end)?;
+                Ok(Type::Unknown)
+            }
         }
     }
 
@@ -384,10 +393,17 @@ impl TypeChecker {
             };
         }
 
+        // Helper: check if one side is Int and the other Float (implicit promotion)
+        let is_int_float_mix = |a: &Type, b: &Type| {
+            matches!((a, b), (Type::Int, Type::Float) | (Type::Float, Type::Int))
+        };
+
         match op {
             BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod => {
                 if lt == rt && matches!(lt, Type::Int | Type::Float) {
                     Ok(lt.clone())
+                } else if is_int_float_mix(lt, rt) {
+                    Ok(Type::Float)
                 } else if matches!(op, BinaryOp::Add)
                     && matches!(lt, Type::String)
                     && matches!(rt, Type::String)
@@ -401,7 +417,7 @@ impl TypeChecker {
                 }
             }
             BinaryOp::Eq | BinaryOp::Neq | BinaryOp::Lt | BinaryOp::Gt | BinaryOp::Le | BinaryOp::Ge => {
-                if lt == rt {
+                if lt == rt || is_int_float_mix(lt, rt) {
                     Ok(Type::Bool)
                 } else {
                     Err(GBasicError::TypeError {
@@ -467,8 +483,11 @@ mod tests {
     }
 
     #[test]
-    fn arithmetic_type_mismatch() {
-        assert!(check_src("let x = 1 + 2.0").is_err());
+    fn arithmetic_int_float_promotion() {
+        // Int + Float promotes to Float
+        assert!(check_src("let x = 1 + 2.0").is_ok());
+        // String + Int is still an error
+        assert!(check_src(r#"let x = "a" + 1"#).is_err());
     }
 
     #[test]
@@ -519,5 +538,62 @@ mod tests {
     #[test]
     fn assignment_type_check() {
         assert!(check_src("let x = 1\nx = 2").is_ok());
+    }
+
+    #[test]
+    fn for_range_variable_is_int() {
+        assert!(check_src("for i in 0..10 { print(i) }").is_ok());
+    }
+
+    #[test]
+    fn for_array_variable_inferred() {
+        assert!(check_src("for x in [1, 2, 3] { print(x) }").is_ok());
+    }
+
+    #[test]
+    fn string_concat_types() {
+        assert!(check_src(r#"let x = "a" + "b""#).is_ok());
+        assert!(check_src(r#"let x = "a" + 1"#).is_err());
+    }
+
+    #[test]
+    fn nested_scopes() {
+        // Variable shadowing in nested blocks
+        assert!(check_src("let x = 1\nif true { let x = \"hello\" }").is_ok());
+    }
+
+    #[test]
+    fn match_subject_type() {
+        assert!(check_src("match 1 { 1 -> { print(\"one\") } _ -> { print(\"other\") } }").is_ok());
+    }
+
+    #[test]
+    fn assignment_to_undeclared() {
+        let r = check_src("x = 42");
+        assert!(r.is_err());
+        let msg = r.unwrap_err().to_string();
+        assert!(msg.contains("undefined"));
+    }
+
+    #[test]
+    fn break_continue_in_loop() {
+        assert!(check_src("while true { break }").is_ok());
+        assert!(check_src("for i in 0..10 { continue }").is_ok());
+    }
+
+    #[test]
+    fn if_else_if_chain() {
+        assert!(check_src("if true { let x = 1 } else { let x = 2 }").is_ok());
+    }
+
+    #[test]
+    fn method_chain_args_checked() {
+        assert!(check_src("Screen.Init(800, 600)").is_ok());
+    }
+
+    #[test]
+    fn logical_op_non_bool_error() {
+        let r = check_src("let x = 1 and 2");
+        assert!(r.is_err());
     }
 }

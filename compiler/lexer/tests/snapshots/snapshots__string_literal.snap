@@ -1,0 +1,23 @@
+---
+source: compiler/lexer/tests/snapshots.rs
+assertion_line: 30
+expression: tokens
+---
+[
+    SpannedToken {
+        token: String(
+            "hello world",
+        ),
+        span: Span {
+            start: 0,
+            end: 13,
+        },
+    },
+    SpannedToken {
+        token: Eof,
+        span: Span {
+            start: 13,
+            end: 13,
+        },
+    },
+]

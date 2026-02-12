@@ -1,18 +1,137 @@
 use gbasic_common::ast::*;
 use gbasic_common::error::GBasicError;
 use gbasic_common::types::Type;
+use inkwell::basic_block::BasicBlock;
 use inkwell::builder::Builder;
 use inkwell::context::Context;
 use inkwell::module::Module;
 use inkwell::targets::{
     CodeModel, FileType, InitializationConfig, RelocMode, Target, TargetMachine,
 };
-use inkwell::types::BasicMetadataTypeEnum;
+use inkwell::types::{BasicMetadataTypeEnum, BasicType};
 use inkwell::values::{BasicMetadataValueEnum, BasicValueEnum, FunctionValue, PointerValue};
 use inkwell::OptimizationLevel;
 use std::collections::HashMap;
 use std::path::Path;
 use std::process::Command;
+
+/// LLVM type descriptor for namespace method signatures
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum LType {
+    I64,
+    F64,
+    Bool,
+    Ptr, // *const i8
+    Void,
+}
+
+impl LType {
+    fn to_gbasic_type(self) -> Type {
+        match self {
+            LType::I64 => Type::Int,
+            LType::F64 => Type::Float,
+            LType::Bool => Type::Bool,
+            LType::Ptr => Type::String,
+            LType::Void => Type::Void,
+        }
+    }
+}
+
+/// Unified namespace method entry: signature + runtime function name.
+struct MethodEntry {
+    params: Vec<LType>,
+    ret: LType,
+    runtime_name: String,
+}
+
+/// Multi-word method names to snake_case for runtime function naming.
+fn method_to_snake(method: &str) -> &str {
+    match method {
+        "setpixel" => "set_pixel",
+        "drawrect" => "draw_rect",
+        "drawline" => "draw_line",
+        "drawcircle" => "draw_circle",
+        "keypressed" => "key_pressed",
+        "mousex" => "mouse_x",
+        "mousey" => "mouse_y",
+        "readfile" => "read_file",
+        "writefile" => "write_file",
+        "framebegin" => "frame_begin",
+        "frameend" => "frame_end",
+        "frametime" => "frame_time",
+        "spriteload" => "sprite_load",
+        "spriteat" => "sprite_at",
+        "spritescale" => "sprite_scale",
+        "spritedraw" => "sprite_draw",
+        "effectload" => "effect_load",
+        "effectplay" => "effect_play",
+        "effectvolume" => "effect_volume",
+        other => other,
+    }
+}
+
+/// Single source of truth for namespace method signatures and runtime names.
+fn get_namespace_method(namespace: NamespaceRef, method: &str) -> Option<MethodEntry> {
+    use LType::*;
+    use NamespaceRef::*;
+    let (params, ret) = match (namespace, method) {
+        // Math
+        (Math, "sin" | "cos" | "sqrt" | "abs" | "floor" | "ceil") => (vec![F64], F64),
+        (Math, "pow" | "max" | "min") => (vec![F64, F64], F64),
+        (Math, "random" | "pi") => (vec![], F64),
+        // Screen
+        (Screen, "init") => (vec![I64, I64], Void),
+        (Screen, "clear") => (vec![I64, I64, I64], Void),
+        (Screen, "setpixel") => (vec![I64, I64, I64, I64, I64], Void),
+        (Screen, "drawrect") => (vec![I64, I64, I64, I64, I64, I64, I64], Void),
+        (Screen, "drawline") => (vec![I64, I64, I64, I64, I64, I64, I64], Void),
+        (Screen, "present") => (vec![], Void),
+        (Screen, "width" | "height") => (vec![], I64),
+        (Screen, "drawcircle") => (vec![I64, I64, I64, I64, I64, I64], Void),
+        (Screen, "spriteload") => (vec![Ptr], I64),
+        (Screen, "spriteat") => (vec![I64, F64, F64], I64),
+        (Screen, "spritescale") => (vec![I64, F64], I64),
+        (Screen, "spritedraw") => (vec![I64], Void),
+        // Input
+        (Input, "keypressed") => (vec![Ptr], Bool),
+        (Input, "mousex" | "mousey") => (vec![], I64),
+        (Input, "poll") => (vec![], Void),
+        // System
+        (System, "time") => (vec![], F64),
+        (System, "sleep") => (vec![I64], Void),
+        (System, "exit") => (vec![I64], Void),
+        (System, "framebegin") => (vec![], Void),
+        (System, "frameend") => (vec![], Void),
+        (System, "frametime") => (vec![], F64),
+        // Sound
+        (Sound, "beep") => (vec![I64, I64], Void),
+        (Sound, "effectload") => (vec![Ptr], I64),
+        (Sound, "effectplay") => (vec![Ptr], Void),
+        (Sound, "effectvolume") => (vec![Ptr, F64], Void),
+        // Memory
+        (Memory, "set") => (vec![Ptr, I64], Void),
+        (Memory, "get") => (vec![Ptr], I64),
+        // IO
+        (IO, "print") => (vec![Ptr], Void),
+        (IO, "printinteger") => (vec![I64], Void),
+        (IO, "readfile") => (vec![Ptr], Ptr),
+        (IO, "writefile") => (vec![Ptr, Ptr], Void),
+        _ => return None,
+    };
+    // Special-case runtime names that don't follow the convention
+    let runtime_name = match (namespace, method) {
+        (IO, "print") => "runtime_print".to_string(),
+        (IO, "printinteger") => "runtime_print_int".to_string(),
+        _ => {
+            let ns = match namespace {
+                Screen => "screen", Sound => "sound", Input => "input",
+                Math => "math", System => "system", Memory => "memory", IO => "io",
+            };
+            format!("runtime_{ns}_{}", method_to_snake(method))
+        }
+    };
+    Some(MethodEntry { params, ret, runtime_name })
+}
 
 /// Variable info: alloca pointer + type
 struct VarInfo<'ctx> {
@@ -26,6 +145,8 @@ pub struct Codegen<'ctx> {
     builder: Builder<'ctx>,
     variables: Vec<HashMap<String, VarInfo<'ctx>>>,
     current_function: Option<FunctionValue<'ctx>>,
+    /// Stack of (continue_target, break_target) for loops
+    loop_exit_stack: Vec<(BasicBlock<'ctx>, BasicBlock<'ctx>)>,
 }
 
 impl<'ctx> Codegen<'ctx> {
@@ -38,6 +159,22 @@ impl<'ctx> Codegen<'ctx> {
             builder,
             variables: vec![HashMap::new()],
             current_function: None,
+            loop_exit_stack: Vec::new(),
+        }
+    }
+
+    fn needs_terminator(&self) -> bool {
+        self.builder.get_insert_block().unwrap().get_terminator().is_none()
+    }
+
+    /// Ensure an integer value is i1 for use as a branch condition.
+    /// If already i1, returns as-is. Otherwise compares != 0.
+    fn ensure_i1(&self, val: inkwell::values::IntValue<'ctx>) -> inkwell::values::IntValue<'ctx> {
+        if val.get_type().get_bit_width() == 1 {
+            val
+        } else {
+            let zero = val.get_type().const_int(0, false);
+            self.builder.build_int_compare(inkwell::IntPredicate::NE, val, zero, "tobool").unwrap()
         }
     }
 
@@ -96,6 +233,10 @@ impl<'ctx> Codegen<'ctx> {
 
         let newline_ty = void_type.fn_type(&[], false);
         self.module.add_function("runtime_print_newline", newline_ty, None);
+
+        // runtime_string_concat(a: *const i8, b: *const i8) -> *const i8
+        let concat_ty = i8_ptr_type.fn_type(&[i8_ptr_type.into(), i8_ptr_type.into()], false);
+        self.module.add_function("runtime_string_concat", concat_ty, None);
     }
 
     pub fn compile(
@@ -135,13 +276,7 @@ impl<'ctx> Codegen<'ctx> {
         }
 
         // Return 0 from main (only if no terminator yet)
-        if cg
-            .builder
-            .get_insert_block()
-            .unwrap()
-            .get_terminator()
-            .is_none()
-        {
+        if cg.needs_terminator() {
             cg.builder
                 .build_return(Some(&i32_type.const_int(0, false)))
                 .unwrap();
@@ -151,7 +286,7 @@ impl<'ctx> Codegen<'ctx> {
         cg.module
             .verify()
             .map_err(|e| GBasicError::CodegenError {
-                message: format!("LLVM verification failed: {}", e.to_string()),
+                span: None, message: format!("LLVM verification failed: {}", e.to_string()),
             })?;
 
         if dump_ir {
@@ -189,7 +324,7 @@ impl<'ctx> Codegen<'ctx> {
             .module
             .get_function(&func.name.name)
             .ok_or_else(|| GBasicError::CodegenError {
-                message: format!("function '{}' not declared", func.name.name),
+                span: None, message: format!("function '{}' not declared", func.name.name),
             })?;
 
         // Save current state
@@ -228,7 +363,7 @@ impl<'ctx> Codegen<'ctx> {
         // If the last statement is an expression in a non-void function, use it as implicit return
         if last_is_expr {
             if let Some(Statement::Expression { expr, .. }) = stmts.last() {
-                if self.builder.get_insert_block().unwrap().get_terminator().is_none() {
+                if self.needs_terminator() {
                     let val = self.codegen_expression(expr)?;
                     if let Some(v) = val {
                         self.builder.build_return(Some(&v)).unwrap();
@@ -240,13 +375,7 @@ impl<'ctx> Codegen<'ctx> {
         }
 
         // Add implicit return if still needed
-        if self
-            .builder
-            .get_insert_block()
-            .unwrap()
-            .get_terminator()
-            .is_none()
-        {
+        if self.needs_terminator() {
             match ret_type {
                 Type::Void => {
                     self.builder.build_return(None).unwrap();
@@ -319,7 +448,8 @@ impl<'ctx> Codegen<'ctx> {
                 else_block,
                 ..
             } => {
-                let cond = self.codegen_expression(condition)?.unwrap().into_int_value();
+                let cond_raw = self.codegen_expression(condition)?.unwrap().into_int_value();
+                let cond = self.ensure_i1(cond_raw);
                 let function = self.current_function.unwrap();
                 let then_bb = self.context.append_basic_block(function, "then");
                 let else_bb = self.context.append_basic_block(function, "else");
@@ -336,13 +466,7 @@ impl<'ctx> Codegen<'ctx> {
                     self.codegen_statement(s)?;
                 }
                 self.pop_scope();
-                if self
-                    .builder
-                    .get_insert_block()
-                    .unwrap()
-                    .get_terminator()
-                    .is_none()
-                {
+                if self.needs_terminator() {
                     self.builder.build_unconditional_branch(merge_bb).unwrap();
                 }
 
@@ -355,13 +479,7 @@ impl<'ctx> Codegen<'ctx> {
                     }
                     self.pop_scope();
                 }
-                if self
-                    .builder
-                    .get_insert_block()
-                    .unwrap()
-                    .get_terminator()
-                    .is_none()
-                {
+                if self.needs_terminator() {
                     self.builder.build_unconditional_branch(merge_bb).unwrap();
                 }
 
@@ -377,28 +495,52 @@ impl<'ctx> Codegen<'ctx> {
 
                 self.builder.build_unconditional_branch(cond_bb).unwrap();
                 self.builder.position_at_end(cond_bb);
-                let cond = self.codegen_expression(condition)?.unwrap().into_int_value();
+                let cond_raw = self.codegen_expression(condition)?.unwrap().into_int_value();
+                let cond = self.ensure_i1(cond_raw);
                 self.builder
                     .build_conditional_branch(cond, body_bb, exit_bb)
                     .unwrap();
 
                 self.builder.position_at_end(body_bb);
                 self.push_scope();
+                self.loop_exit_stack.push((cond_bb, exit_bb));
                 for s in &body.statements {
                     self.codegen_statement(s)?;
                 }
+                self.loop_exit_stack.pop();
                 self.pop_scope();
-                if self
-                    .builder
-                    .get_insert_block()
-                    .unwrap()
-                    .get_terminator()
-                    .is_none()
-                {
+                if self.needs_terminator() {
                     self.builder.build_unconditional_branch(cond_bb).unwrap();
                 }
 
                 self.builder.position_at_end(exit_bb);
+            }
+            Statement::For {
+                variable,
+                iterable,
+                body,
+                ..
+            } => {
+                self.codegen_for_loop(variable, iterable, body)?;
+            }
+            Statement::Match {
+                subject, arms, ..
+            } => {
+                self.codegen_match(subject, arms)?;
+            }
+            Statement::Break { .. } => {
+                if let Some(&(_, break_bb)) = self.loop_exit_stack.last() {
+                    if self.needs_terminator() {
+                        self.builder.build_unconditional_branch(break_bb).unwrap();
+                    }
+                }
+            }
+            Statement::Continue { .. } => {
+                if let Some(&(continue_bb, _)) = self.loop_exit_stack.last() {
+                    if self.needs_terminator() {
+                        self.builder.build_unconditional_branch(continue_bb).unwrap();
+                    }
+                }
             }
             Statement::Block(block) => {
                 self.push_scope();
@@ -410,11 +552,273 @@ impl<'ctx> Codegen<'ctx> {
             Statement::Function(_) => {
                 // Already handled in top-level pass
             }
-            _ => {
-                // For/Match/Break/Continue — not yet implemented
-            }
         }
         Ok(())
+    }
+
+    /// Create the 4 basic blocks for a for-loop: cond, body, inc, exit.
+    fn make_loop_blocks(&self) -> (BasicBlock<'ctx>, BasicBlock<'ctx>, BasicBlock<'ctx>, BasicBlock<'ctx>) {
+        let function = self.current_function.unwrap();
+        (
+            self.context.append_basic_block(function, "for_cond"),
+            self.context.append_basic_block(function, "for_body"),
+            self.context.append_basic_block(function, "for_inc"),
+            self.context.append_basic_block(function, "for_exit"),
+        )
+    }
+
+    /// Codegen a loop body with proper scope, loop_exit_stack, and fallthrough to inc_bb.
+    fn codegen_loop_body(
+        &mut self,
+        var_name: &str,
+        var_alloca: PointerValue<'ctx>,
+        var_ty: Type,
+        body: &Block,
+        inc_bb: BasicBlock<'ctx>,
+        exit_bb: BasicBlock<'ctx>,
+    ) -> Result<(), GBasicError> {
+        self.push_scope();
+        self.insert_var(var_name.to_string(), VarInfo { ptr: var_alloca, ty: var_ty });
+        self.loop_exit_stack.push((inc_bb, exit_bb));
+        for s in &body.statements {
+            self.codegen_statement(s)?;
+        }
+        self.loop_exit_stack.pop();
+        self.pop_scope();
+        if self.needs_terminator() {
+            self.builder.build_unconditional_branch(inc_bb).unwrap();
+        }
+        Ok(())
+    }
+
+    fn codegen_for_loop(
+        &mut self,
+        variable: &Identifier,
+        iterable: &Expression,
+        body: &Block,
+    ) -> Result<(), GBasicError> {
+        let i64_type = self.context.i64_type();
+
+        // Check if iterable is a Range expression → simple int counter loop
+        if let Expression::Range { start, end, .. } = iterable {
+            let start_val = self.codegen_expression(start)?.unwrap().into_int_value();
+            let end_val = self.codegen_expression(end)?.unwrap().into_int_value();
+
+            let var_alloca = self.builder.build_alloca(i64_type, &variable.name).unwrap();
+            self.builder.build_store(var_alloca, start_val).unwrap();
+
+            let (cond_bb, body_bb, inc_bb, exit_bb) = self.make_loop_blocks();
+
+            self.builder.build_unconditional_branch(cond_bb).unwrap();
+            self.builder.position_at_end(cond_bb);
+            let current = self.builder.build_load(i64_type, var_alloca, "i").unwrap().into_int_value();
+            let cond = self.builder.build_int_compare(
+                inkwell::IntPredicate::SLT, current, end_val, "for_cond"
+            ).unwrap();
+            self.builder.build_conditional_branch(cond, body_bb, exit_bb).unwrap();
+
+            self.builder.position_at_end(body_bb);
+            self.codegen_loop_body(&variable.name, var_alloca, Type::Int, body, inc_bb, exit_bb)?;
+
+            self.builder.position_at_end(inc_bb);
+            let next = self.builder.build_int_add(
+                self.builder.build_load(i64_type, var_alloca, "i").unwrap().into_int_value(),
+                i64_type.const_int(1, false),
+                "inc"
+            ).unwrap();
+            self.builder.build_store(var_alloca, next).unwrap();
+            self.builder.build_unconditional_branch(cond_bb).unwrap();
+
+            self.builder.position_at_end(exit_bb);
+            return Ok(());
+        }
+
+        // Array iteration: codegen array, iterate with index counter
+        if let Expression::Array { elements, .. } = iterable {
+            if elements.is_empty() {
+                return Ok(());
+            }
+
+            let elem_ty = self.infer_expr_type(&elements[0]);
+            let llvm_elem_ty = self.type_to_llvm_basic(&elem_ty);
+            let len = elements.len() as u64;
+
+            let array_ty = llvm_elem_ty.array_type(len as u32);
+            let array_alloca = self.builder.build_alloca(array_ty, "arr").unwrap();
+
+            for (i, elem) in elements.iter().enumerate() {
+                let val = self.codegen_expression(elem)?.unwrap();
+                let gep = unsafe {
+                    self.builder.build_gep(
+                        array_ty, array_alloca,
+                        &[i64_type.const_int(0, false), i64_type.const_int(i as u64, false)],
+                        "elem_ptr",
+                    ).unwrap()
+                };
+                self.builder.build_store(gep, val).unwrap();
+            }
+
+            let idx_alloca = self.builder.build_alloca(i64_type, "idx").unwrap();
+            self.builder.build_store(idx_alloca, i64_type.const_int(0, false)).unwrap();
+            let var_alloca = self.builder.build_alloca(llvm_elem_ty, &variable.name).unwrap();
+
+            let (cond_bb, body_bb, inc_bb, exit_bb) = self.make_loop_blocks();
+
+            self.builder.build_unconditional_branch(cond_bb).unwrap();
+            self.builder.position_at_end(cond_bb);
+            let idx = self.builder.build_load(i64_type, idx_alloca, "idx").unwrap().into_int_value();
+            let cond = self.builder.build_int_compare(
+                inkwell::IntPredicate::SLT, idx, i64_type.const_int(len, false), "for_cond"
+            ).unwrap();
+            self.builder.build_conditional_branch(cond, body_bb, exit_bb).unwrap();
+
+            self.builder.position_at_end(body_bb);
+            let idx_val = self.builder.build_load(i64_type, idx_alloca, "idx").unwrap().into_int_value();
+            let elem_ptr = unsafe {
+                self.builder.build_gep(
+                    array_ty, array_alloca,
+                    &[i64_type.const_int(0, false), idx_val],
+                    "elem_ptr",
+                ).unwrap()
+            };
+            let elem_val = self.builder.build_load(llvm_elem_ty, elem_ptr, "elem").unwrap();
+            self.builder.build_store(var_alloca, elem_val).unwrap();
+
+            self.codegen_loop_body(&variable.name, var_alloca, elem_ty, body, inc_bb, exit_bb)?;
+
+            self.builder.position_at_end(inc_bb);
+            let next_idx = self.builder.build_int_add(
+                self.builder.build_load(i64_type, idx_alloca, "idx").unwrap().into_int_value(),
+                i64_type.const_int(1, false),
+                "inc"
+            ).unwrap();
+            self.builder.build_store(idx_alloca, next_idx).unwrap();
+            self.builder.build_unconditional_branch(cond_bb).unwrap();
+
+            self.builder.position_at_end(exit_bb);
+            return Ok(());
+        }
+
+        Err(GBasicError::CodegenError {
+            span: Some(iterable.span()), message: "for-loop iterable must be a range (start..end) or array literal".into(),
+        })
+    }
+
+    fn codegen_match(
+        &mut self,
+        subject: &Expression,
+        arms: &[MatchArm],
+    ) -> Result<(), GBasicError> {
+        let subject_val = self.codegen_expression(subject)?.unwrap();
+        let subject_ty = self.infer_expr_type(subject);
+        let function = self.current_function.unwrap();
+        let merge_bb = self.context.append_basic_block(function, "match_end");
+
+        for (i, arm) in arms.iter().enumerate() {
+            match &arm.pattern {
+                Pattern::Wildcard(_) => {
+                    // Unconditional — emit body and branch to merge
+                    self.push_scope();
+                    for s in &arm.body.statements {
+                        self.codegen_statement(s)?;
+                    }
+                    self.pop_scope();
+                    if self.needs_terminator() {
+                        self.builder.build_unconditional_branch(merge_bb).unwrap();
+                    }
+                }
+                Pattern::Literal(lit) => {
+                    let pat_val = self.codegen_literal(lit)?;
+                    let cond = self.build_equality_check(subject_val, pat_val, &subject_ty)?;
+
+                    let arm_bb = self.context.append_basic_block(function, &format!("match_arm_{i}"));
+                    let next_bb = self.context.append_basic_block(function, &format!("match_next_{i}"));
+
+                    self.builder.build_conditional_branch(cond, arm_bb, next_bb).unwrap();
+
+                    self.builder.position_at_end(arm_bb);
+                    self.push_scope();
+                    for s in &arm.body.statements {
+                        self.codegen_statement(s)?;
+                    }
+                    self.pop_scope();
+                    if self.needs_terminator() {
+                        self.builder.build_unconditional_branch(merge_bb).unwrap();
+                    }
+
+                    self.builder.position_at_end(next_bb);
+                }
+                Pattern::Identifier(id) => {
+                    // Bind the subject value to the identifier name, then execute body
+                    let arm_bb = self.context.append_basic_block(function, &format!("match_arm_{i}"));
+                    let next_bb = self.context.append_basic_block(function, &format!("match_next_{i}"));
+
+                    // Identifier patterns always match (like a wildcard but with binding)
+                    self.builder.build_unconditional_branch(arm_bb).unwrap();
+
+                    self.builder.position_at_end(arm_bb);
+                    self.push_scope();
+                    let alloca = self.build_alloca_for_type(&subject_ty, &id.name);
+                    self.builder.build_store(alloca, subject_val).unwrap();
+                    self.insert_var(id.name.clone(), VarInfo { ptr: alloca, ty: subject_ty.clone() });
+                    for s in &arm.body.statements {
+                        self.codegen_statement(s)?;
+                    }
+                    self.pop_scope();
+                    if self.needs_terminator() {
+                        self.builder.build_unconditional_branch(merge_bb).unwrap();
+                    }
+
+                    // next_bb is unreachable after an identifier pattern (it catches all)
+                    self.builder.position_at_end(next_bb);
+                }
+            }
+        }
+
+        // If we fall through all arms, branch to merge
+        if self.needs_terminator() {
+            self.builder.build_unconditional_branch(merge_bb).unwrap();
+        }
+        self.builder.position_at_end(merge_bb);
+        Ok(())
+    }
+
+    fn codegen_literal(&mut self, lit: &Literal) -> Result<BasicValueEnum<'ctx>, GBasicError> {
+        match &lit.kind {
+            LiteralKind::Int(v) => Ok(self.context.i64_type().const_int(*v as u64, true).into()),
+            LiteralKind::Float(v) => Ok(self.context.f64_type().const_float(*v).into()),
+            LiteralKind::Bool(v) => Ok(self.context.bool_type().const_int(if *v { 1 } else { 0 }, false).into()),
+            LiteralKind::String(s) => {
+                let global = self.builder.build_global_string_ptr(s, "str").unwrap();
+                Ok(global.as_pointer_value().into())
+            }
+        }
+    }
+
+    fn build_equality_check(
+        &self,
+        lv: BasicValueEnum<'ctx>,
+        rv: BasicValueEnum<'ctx>,
+        ty: &Type,
+    ) -> Result<inkwell::values::IntValue<'ctx>, GBasicError> {
+        match ty {
+            Type::Int | Type::Bool => {
+                Ok(self.builder.build_int_compare(
+                    inkwell::IntPredicate::EQ, lv.into_int_value(), rv.into_int_value(), "eq"
+                ).unwrap())
+            }
+            Type::Float => {
+                Ok(self.builder.build_float_compare(
+                    inkwell::FloatPredicate::OEQ, lv.into_float_value(), rv.into_float_value(), "eq"
+                ).unwrap())
+            }
+            _ => {
+                // For strings/unknown, compare as ints (pointer equality — MVP)
+                Ok(self.builder.build_int_compare(
+                    inkwell::IntPredicate::EQ, lv.into_int_value(), rv.into_int_value(), "eq"
+                ).unwrap())
+            }
+        }
     }
 
     fn codegen_expression(
@@ -422,31 +826,11 @@ impl<'ctx> Codegen<'ctx> {
         expr: &Expression,
     ) -> Result<Option<BasicValueEnum<'ctx>>, GBasicError> {
         match expr {
-            Expression::Literal(lit) => match &lit.kind {
-                LiteralKind::Int(v) => Ok(Some(
-                    self.context
-                        .i64_type()
-                        .const_int(*v as u64, true)
-                        .into(),
-                )),
-                LiteralKind::Float(v) => Ok(Some(
-                    self.context.f64_type().const_float(*v).into(),
-                )),
-                LiteralKind::Bool(v) => Ok(Some(
-                    self.context
-                        .bool_type()
-                        .const_int(if *v { 1 } else { 0 }, false)
-                        .into(),
-                )),
-                LiteralKind::String(s) => {
-                    let global = self.builder.build_global_string_ptr(s, "str").unwrap();
-                    Ok(Some(global.as_pointer_value().into()))
-                }
-            },
+            Expression::Literal(lit) => Ok(Some(self.codegen_literal(lit)?)),
             Expression::Identifier(id) => {
                 let var = self.lookup_var(&id.name).ok_or_else(|| {
                     GBasicError::CodegenError {
-                        message: format!("undefined variable '{}'", id.name),
+                        span: Some(id.span), message: format!("undefined variable '{}'", id.name),
                     }
                 })?;
                 let llvm_type = self.type_to_llvm_basic(&var.ty);
@@ -455,22 +839,48 @@ impl<'ctx> Codegen<'ctx> {
                 Ok(Some(val))
             }
             Expression::BinaryOp {
-                left, op, right, ..
+                left, op, right, span,
             } => {
+                // String concatenation via + operator
+                let left_ty = self.infer_expr_type(left);
+                if matches!(left_ty, Type::String) && matches!(op, BinaryOp::Add) {
+                    let lv = self.codegen_expression(left)?.unwrap();
+                    let rv = self.codegen_expression(right)?.unwrap();
+                    let concat_fn = self.module.get_function("runtime_string_concat").unwrap();
+                    let result = self.builder.build_call(
+                        concat_fn,
+                        &[lv.into(), rv.into()],
+                        "concat"
+                    ).unwrap();
+                    return Ok(result.try_as_basic_value().left());
+                }
+
+                let right_ty = self.infer_expr_type(right);
                 let lv = self.codegen_expression(left)?.unwrap();
                 let rv = self.codegen_expression(right)?.unwrap();
-                let left_ty = self.infer_expr_type(left);
 
-                let result = match left_ty {
-                    Type::Int => self.codegen_int_binop(lv.into_int_value(), op, rv.into_int_value()),
-                    Type::Float => {
-                        self.codegen_float_binop(lv.into_float_value(), op, rv.into_float_value())
+                let result = match (&left_ty, &right_ty) {
+                    // Mixed Int/Float: promote Int side to Float
+                    (Type::Int, Type::Float) => {
+                        let lf = self.builder.build_signed_int_to_float(
+                            lv.into_int_value(), self.context.f64_type(), "itof"
+                        ).unwrap();
+                        self.codegen_float_binop(lf, op, rv.into_float_value())
                     }
-                    Type::Bool => {
+                    (Type::Float, Type::Int) => {
+                        let rf = self.builder.build_signed_int_to_float(
+                            rv.into_int_value(), self.context.f64_type(), "itof"
+                        ).unwrap();
+                        self.codegen_float_binop(lv.into_float_value(), op, rf)
+                    }
+                    (Type::Int, _) | (Type::Bool, _) => {
                         self.codegen_int_binop(lv.into_int_value(), op, rv.into_int_value())
                     }
+                    (Type::Float, _) => {
+                        self.codegen_float_binop(lv.into_float_value(), op, rv.into_float_value())
+                    }
                     _ => Err(GBasicError::CodegenError {
-                        message: format!("unsupported binary op on {left_ty}"),
+                        span: Some(*span), message: format!("unsupported binary op on {left_ty}"),
                     }),
                 }?;
                 Ok(Some(result))
@@ -493,7 +903,7 @@ impl<'ctx> Codegen<'ctx> {
                                 .into(),
                         )),
                         _ => Err(GBasicError::CodegenError {
-                            message: "cannot negate non-numeric".into(),
+                            span: None, message: "cannot negate non-numeric".into(),
                         }),
                     },
                     UnaryOp::Not => Ok(Some(
@@ -512,7 +922,7 @@ impl<'ctx> Codegen<'ctx> {
                 if let Expression::Identifier(id) = target.as_ref() {
                     let var = self.lookup_var(&id.name).ok_or_else(|| {
                         GBasicError::CodegenError {
-                            message: format!("undefined variable '{}'", id.name),
+                            span: Some(id.span), message: format!("undefined variable '{}'", id.name),
                         }
                     })?;
                     let ptr = var.ptr;
@@ -521,33 +931,196 @@ impl<'ctx> Codegen<'ctx> {
                 Ok(Some(val))
             }
             Expression::StringInterp { parts, .. } => {
-                // For standalone string interp (not inside print), emit parts and return empty string
-                // This is a simplified approach — full concat would need a runtime allocator
-                for part in parts {
-                    match part {
-                        StringPart::Lit(s) => {
-                            let global = self.builder.build_global_string_ptr(s, "str_part").unwrap();
-                            let print_fn = self.module.get_function("runtime_print_str_part").unwrap();
-                            self.builder.build_call(print_fn, &[global.as_pointer_value().into()], "").unwrap();
-                        }
-                        StringPart::Expr(e) => {
-                            self.emit_print_expr_part(e)?;
-                        }
-                    }
-                }
+                self.emit_string_interp_parts(parts)?;
                 let newline_fn = self.module.get_function("runtime_print_newline").unwrap();
                 self.builder.build_call(newline_fn, &[], "").unwrap();
                 let empty = self.builder.build_global_string_ptr("", "empty").unwrap();
                 Ok(Some(empty.as_pointer_value().into()))
             }
-            Expression::MethodChain { .. }
-            | Expression::Array { .. }
-            | Expression::Index { .. }
-            | Expression::FieldAccess { .. } => {
-                // Not yet implemented — return null pointer
+            Expression::MethodChain { base, chain, .. } => {
+                self.codegen_method_chain(*base, chain)
+            }
+            Expression::Array { elements, .. } => {
+                self.codegen_array(elements)
+            }
+            Expression::Index { object, index, .. } => {
+                self.codegen_index(object, index)
+            }
+            Expression::Range { .. } => {
+                // Range expressions are only valid as for-loop iterables, not standalone
+                Err(GBasicError::CodegenError {
+                    span: None, message: "range expressions can only be used in for-loop iterables".into(),
+                })
+            }
+            Expression::FieldAccess { .. } => {
                 let null = self.context.ptr_type(inkwell::AddressSpace::default()).const_null();
                 Ok(Some(null.into()))
             }
+        }
+    }
+
+    fn codegen_array(
+        &mut self,
+        elements: &[Expression],
+    ) -> Result<Option<BasicValueEnum<'ctx>>, GBasicError> {
+        if elements.is_empty() {
+            let null = self.context.ptr_type(inkwell::AddressSpace::default()).const_null();
+            return Ok(Some(null.into()));
+        }
+
+        let elem_ty = self.infer_expr_type(&elements[0]);
+        let llvm_elem_ty = self.type_to_llvm_basic(&elem_ty);
+        let len = elements.len() as u32;
+        let array_ty = llvm_elem_ty.array_type(len);
+        let alloca = self.builder.build_alloca(array_ty, "arr").unwrap();
+        let i64_type = self.context.i64_type();
+
+        for (i, elem) in elements.iter().enumerate() {
+            let val = self.codegen_expression(elem)?.unwrap();
+            let gep = unsafe {
+                self.builder.build_gep(
+                    array_ty,
+                    alloca,
+                    &[
+                        i64_type.const_int(0, false),
+                        i64_type.const_int(i as u64, false),
+                    ],
+                    "elem_ptr",
+                ).unwrap()
+            };
+            self.builder.build_store(gep, val).unwrap();
+        }
+
+        // Return pointer to the array
+        Ok(Some(alloca.into()))
+    }
+
+    fn codegen_index(
+        &mut self,
+        object: &Expression,
+        index: &Expression,
+    ) -> Result<Option<BasicValueEnum<'ctx>>, GBasicError> {
+        let obj_val = self.codegen_expression(object)?.unwrap();
+        let idx_val = self.codegen_expression(index)?.unwrap().into_int_value();
+
+        // Infer element type from the array expression
+        let elem_ty = match self.infer_expr_type(object) {
+            Type::Array(inner) => *inner,
+            _ => Type::Int, // fallback
+        };
+        let llvm_elem_ty = self.type_to_llvm_basic(&elem_ty);
+
+        // Object should be a pointer to an array allocation
+        let ptr = obj_val.into_pointer_value();
+
+        let gep = unsafe {
+            self.builder.build_gep(
+                llvm_elem_ty,
+                ptr,
+                &[idx_val],
+                "idx_ptr",
+            ).unwrap()
+        };
+        let val = self.builder.build_load(llvm_elem_ty, gep, "idx_val").unwrap();
+        Ok(Some(val))
+    }
+
+    fn ltype_to_meta(&self, t: LType) -> BasicMetadataTypeEnum<'ctx> {
+        match t {
+            LType::I64 => self.context.i64_type().into(),
+            LType::F64 => self.context.f64_type().into(),
+            LType::Bool => self.context.i64_type().into(), // bool passed as i64 in ABI
+            LType::Ptr => self.context.ptr_type(inkwell::AddressSpace::default()).into(),
+            LType::Void => unreachable!(),
+        }
+    }
+
+    fn get_or_declare_runtime_fn(
+        &self,
+        namespace: NamespaceRef,
+        method: &str,
+    ) -> Result<(FunctionValue<'ctx>, Vec<LType>, LType), GBasicError> {
+        let entry = get_namespace_method(namespace, method)
+            .ok_or_else(|| GBasicError::CodegenError {
+                span: None, message: format!("unknown namespace method: {namespace}.{method}"),
+            })?;
+        let param_types = entry.params;
+        let ret_type = entry.ret;
+        let fn_name = entry.runtime_name;
+
+        let function = if let Some(f) = self.module.get_function(&fn_name) {
+            f
+        } else {
+            let params: Vec<BasicMetadataTypeEnum> = param_types.iter().map(|t| self.ltype_to_meta(*t)).collect();
+            let fn_type = match ret_type {
+                LType::Void => self.context.void_type().fn_type(&params, false),
+                LType::I64 => self.context.i64_type().fn_type(&params, false),
+                LType::F64 => self.context.f64_type().fn_type(&params, false),
+                LType::Bool => self.context.i64_type().fn_type(&params, false),
+                LType::Ptr => self.context.ptr_type(inkwell::AddressSpace::default()).fn_type(&params, false),
+            };
+            self.module.add_function(&fn_name, fn_type, None)
+        };
+
+        Ok((function, param_types, ret_type))
+    }
+
+    fn codegen_method_chain(
+        &mut self,
+        namespace: NamespaceRef,
+        chain: &[MethodCall],
+    ) -> Result<Option<BasicValueEnum<'ctx>>, GBasicError> {
+        let mut last_result: Option<BasicValueEnum<'ctx>> = None;
+
+        for call in chain {
+            let method_name = &call.method.name; // already lowercased by lexer
+            let (function, param_types, ret_type) = self.get_or_declare_runtime_fn(namespace, method_name)?;
+
+            // Codegen args, casting as needed
+            let mut compiled_args: Vec<BasicMetadataValueEnum> = Vec::new();
+            for (i, arg) in call.args.iter().enumerate() {
+                let val = self.codegen_expression(arg)?.ok_or_else(|| GBasicError::CodegenError {
+                    span: None, message: format!("void expression as argument to {namespace}.{method_name}"),
+                })?;
+
+                let expected = param_types.get(i).copied().unwrap_or(LType::I64);
+                let converted = self.coerce_to_ltype(val, &self.infer_expr_type(arg), expected)?;
+                compiled_args.push(converted.into());
+            }
+
+            let call_result = self.builder
+                .build_call(function, &compiled_args, if ret_type == LType::Void { "" } else { "ns_call" })
+                .unwrap();
+
+            last_result = match ret_type {
+                LType::Void => None,
+                _ => call_result.try_as_basic_value().left(),
+            };
+        }
+
+        Ok(last_result)
+    }
+
+    fn coerce_to_ltype(
+        &self,
+        val: BasicValueEnum<'ctx>,
+        from: &Type,
+        to: LType,
+    ) -> Result<BasicValueEnum<'ctx>, GBasicError> {
+        match (from, to) {
+            // Int → F64
+            (Type::Int, LType::F64) => {
+                Ok(self.builder.build_signed_int_to_float(
+                    val.into_int_value(), self.context.f64_type(), "itof"
+                ).unwrap().into())
+            }
+            // Float → I64
+            (Type::Float, LType::I64) => {
+                Ok(self.builder.build_float_to_signed_int(
+                    val.into_float_value(), self.context.i64_type(), "ftoi"
+                ).unwrap().into())
+            }
+            _ => Ok(val),
         }
     }
 
@@ -567,7 +1140,7 @@ impl<'ctx> Codegen<'ctx> {
                 .module
                 .get_function(&id.name)
                 .ok_or_else(|| GBasicError::CodegenError {
-                    message: format!("undefined function '{}'", id.name),
+                    span: None, message: format!("undefined function '{}'", id.name),
                 })?;
 
             let mut compiled_args: Vec<BasicMetadataValueEnum> = Vec::new();
@@ -584,41 +1157,66 @@ impl<'ctx> Codegen<'ctx> {
             Ok(call.try_as_basic_value().left())
         } else {
             Err(GBasicError::CodegenError {
-                message: "only direct function calls supported".into(),
+                span: None, message: "only direct function calls supported".into(),
             })
         }
     }
 
-    /// Emit a single expression as a print part (no newline)
-    fn emit_print_expr_part(
+    /// Emit a typed print call. `suffix` is "" for newline-printing, "_part" for no-newline.
+    fn emit_typed_print_call(
         &mut self,
-        expr: &Expression,
-    ) -> Result<(), GBasicError> {
-        let ty = self.infer_expr_type(expr);
-        let val = self.codegen_expression(expr)?;
+        val: Option<BasicValueEnum<'ctx>>,
+        ty: &Type,
+        suffix: &str,
+    ) {
         match ty {
             Type::String | Type::Unknown => {
-                let f = self.module.get_function("runtime_print_str_part").unwrap();
-                self.builder.build_call(f, &[val.unwrap().into()], "").unwrap();
+                let fname = if suffix.is_empty() { "runtime_print" } else { "runtime_print_str_part" };
+                let f = self.module.get_function(fname).unwrap();
+                if let Some(v) = val {
+                    self.builder.build_call(f, &[v.into()], "").unwrap();
+                }
             }
             Type::Int => {
-                let f = self.module.get_function("runtime_print_int_part").unwrap();
+                let fname = format!("runtime_print_int{suffix}");
+                let f = self.module.get_function(&fname).unwrap();
                 self.builder.build_call(f, &[val.unwrap().into()], "").unwrap();
             }
             Type::Float => {
-                let f = self.module.get_function("runtime_print_float_part").unwrap();
+                let fname = format!("runtime_print_float{suffix}");
+                let f = self.module.get_function(&fname).unwrap();
                 self.builder.build_call(f, &[val.unwrap().into()], "").unwrap();
             }
             Type::Bool => {
                 let bool_val = val.unwrap().into_int_value();
                 let i64_val = self.builder.build_int_z_extend(bool_val, self.context.i64_type(), "bool_ext").unwrap();
-                let f = self.module.get_function("runtime_print_int_part").unwrap();
+                let fname = format!("runtime_print_int{suffix}");
+                let f = self.module.get_function(&fname).unwrap();
                 self.builder.build_call(f, &[i64_val.into()], "").unwrap();
             }
             _ => {
+                let fname = if suffix.is_empty() { "runtime_print" } else { "runtime_print_str_part" };
+                let f = self.module.get_function(fname).unwrap();
                 if let Some(v) = val {
-                    let f = self.module.get_function("runtime_print_str_part").unwrap();
                     self.builder.build_call(f, &[v.into()], "").unwrap();
+                }
+            }
+        }
+    }
+
+    /// Emit string interpolation parts (no trailing newline).
+    fn emit_string_interp_parts(&mut self, parts: &[StringPart]) -> Result<(), GBasicError> {
+        for part in parts {
+            match part {
+                StringPart::Lit(s) => {
+                    let global = self.builder.build_global_string_ptr(s, "str_part").unwrap();
+                    let f = self.module.get_function("runtime_print_str_part").unwrap();
+                    self.builder.build_call(f, &[global.as_pointer_value().into()], "").unwrap();
+                }
+                StringPart::Expr(e) => {
+                    let ty = self.infer_expr_type(e);
+                    let val = self.codegen_expression(e)?;
+                    self.emit_typed_print_call(val, &ty, "_part");
                 }
             }
         }
@@ -631,18 +1229,7 @@ impl<'ctx> Codegen<'ctx> {
     ) -> Result<Option<BasicValueEnum<'ctx>>, GBasicError> {
         // Special-case: print(StringInterp) — emit parts + newline
         if let Expression::StringInterp { parts, .. } = arg {
-            for part in parts {
-                match part {
-                    StringPart::Lit(s) => {
-                        let global = self.builder.build_global_string_ptr(s, "str_part").unwrap();
-                        let f = self.module.get_function("runtime_print_str_part").unwrap();
-                        self.builder.build_call(f, &[global.as_pointer_value().into()], "").unwrap();
-                    }
-                    StringPart::Expr(e) => {
-                        self.emit_print_expr_part(e)?;
-                    }
-                }
-            }
+            self.emit_string_interp_parts(parts)?;
             let newline_fn = self.module.get_function("runtime_print_newline").unwrap();
             self.builder.build_call(newline_fn, &[], "").unwrap();
             return Ok(None);
@@ -650,48 +1237,7 @@ impl<'ctx> Codegen<'ctx> {
 
         let arg_ty = self.infer_expr_type(arg);
         let val = self.codegen_expression(arg)?;
-
-        match arg_ty {
-            Type::String => {
-                let print_fn = self.module.get_function("runtime_print").unwrap();
-                self.builder
-                    .build_call(print_fn, &[val.unwrap().into()], "")
-                    .unwrap();
-            }
-            Type::Int => {
-                let print_fn = self.module.get_function("runtime_print_int").unwrap();
-                self.builder
-                    .build_call(print_fn, &[val.unwrap().into()], "")
-                    .unwrap();
-            }
-            Type::Float => {
-                let print_fn = self.module.get_function("runtime_print_float").unwrap();
-                self.builder
-                    .build_call(print_fn, &[val.unwrap().into()], "")
-                    .unwrap();
-            }
-            Type::Bool => {
-                // Convert bool to int and print as int
-                let bool_val = val.unwrap().into_int_value();
-                let i64_val = self
-                    .builder
-                    .build_int_z_extend(bool_val, self.context.i64_type(), "bool_ext")
-                    .unwrap();
-                let print_fn = self.module.get_function("runtime_print_int").unwrap();
-                self.builder
-                    .build_call(print_fn, &[i64_val.into()], "")
-                    .unwrap();
-            }
-            _ => {
-                // Fallback: try print as string pointer
-                if let Some(v) = val {
-                    let print_fn = self.module.get_function("runtime_print").unwrap();
-                    self.builder
-                        .build_call(print_fn, &[v.into()], "")
-                        .unwrap();
-                }
-            }
-        }
+        self.emit_typed_print_call(val, &arg_ty, "");
         Ok(None)
     }
 
@@ -745,8 +1291,16 @@ impl<'ctx> Codegen<'ctx> {
                 .build_int_compare(inkwell::IntPredicate::SGE, lv, rv, "ge")
                 .unwrap()
                 .into(),
-            BinaryOp::And => self.builder.build_and(lv, rv, "and").unwrap().into(),
-            BinaryOp::Or => self.builder.build_or(lv, rv, "or").unwrap().into(),
+            BinaryOp::And => {
+                let l1 = self.ensure_i1(lv);
+                let r1 = self.ensure_i1(rv);
+                self.builder.build_and(l1, r1, "and").unwrap().into()
+            }
+            BinaryOp::Or => {
+                let l1 = self.ensure_i1(lv);
+                let r1 = self.ensure_i1(rv);
+                self.builder.build_or(l1, r1, "or").unwrap().into()
+            }
         })
     }
 
@@ -794,7 +1348,7 @@ impl<'ctx> Codegen<'ctx> {
                 .into(),
             _ => {
                 return Err(GBasicError::CodegenError {
-                    message: format!("unsupported float op: {op}"),
+                    span: None, message: format!("unsupported float op: {op}"),
                 })
             }
         })
@@ -813,11 +1367,21 @@ impl<'ctx> Codegen<'ctx> {
                     .map(|v| v.ty.clone())
                     .unwrap_or(Type::Unknown)
             }
-            Expression::BinaryOp { left, op, .. } => {
+            Expression::BinaryOp { left, op, right, .. } => {
                 match op {
                     BinaryOp::Eq | BinaryOp::Neq | BinaryOp::Lt | BinaryOp::Gt
                     | BinaryOp::Le | BinaryOp::Ge | BinaryOp::And | BinaryOp::Or => Type::Bool,
-                    _ => self.infer_expr_type(left),
+                    _ => {
+                        let lt = self.infer_expr_type(left);
+                        let rt = self.infer_expr_type(right);
+                        if matches!(lt, Type::String) {
+                            Type::String
+                        } else if matches!((&lt, &rt), (Type::Int, Type::Float) | (Type::Float, Type::Int)) {
+                            Type::Float
+                        } else {
+                            lt
+                        }
+                    }
                 }
             }
             Expression::UnaryOp { op, operand, .. } => match op {
@@ -850,7 +1414,28 @@ impl<'ctx> Codegen<'ctx> {
             }
             Expression::StringInterp { .. } => Type::String,
             Expression::Assignment { value, .. } => self.infer_expr_type(value),
-            Expression::Array { .. } => Type::Unknown,
+            Expression::MethodChain { base, chain, .. } => {
+                if let Some(last) = chain.last() {
+                    if let Some(entry) = get_namespace_method(*base, &last.method.name) {
+                        return entry.ret.to_gbasic_type();
+                    }
+                }
+                Type::Unknown
+            }
+            Expression::Array { elements, .. } => {
+                if let Some(first) = elements.first() {
+                    Type::Array(Box::new(self.infer_expr_type(first)))
+                } else {
+                    Type::Array(Box::new(Type::Unknown))
+                }
+            }
+            Expression::Index { object, .. } => {
+                match self.infer_expr_type(object) {
+                    Type::Array(inner) => *inner,
+                    _ => Type::Unknown,
+                }
+            }
+            Expression::Range { .. } => Type::Unknown,
             _ => Type::Unknown,
         }
     }
@@ -860,31 +1445,7 @@ impl<'ctx> Codegen<'ctx> {
         ty: &Type,
         name: &str,
     ) -> PointerValue<'ctx> {
-        match ty {
-            Type::Int => self
-                .builder
-                .build_alloca(self.context.i64_type(), name)
-                .unwrap(),
-            Type::Float => self
-                .builder
-                .build_alloca(self.context.f64_type(), name)
-                .unwrap(),
-            Type::Bool => self
-                .builder
-                .build_alloca(self.context.bool_type(), name)
-                .unwrap(),
-            Type::String | Type::Unknown => self
-                .builder
-                .build_alloca(
-                    self.context.ptr_type(inkwell::AddressSpace::default()),
-                    name,
-                )
-                .unwrap(),
-            _ => self
-                .builder
-                .build_alloca(self.context.i64_type(), name)
-                .unwrap(),
-        }
+        self.builder.build_alloca(self.type_to_llvm_basic(ty), name).unwrap()
     }
 
     fn type_to_llvm_basic(
@@ -911,28 +1472,19 @@ impl<'ctx> Codegen<'ctx> {
         &self,
         ty: &Type,
     ) -> BasicMetadataTypeEnum<'ctx> {
-        match ty {
-            Type::Int => self.context.i64_type().into(),
-            Type::Float => self.context.f64_type().into(),
-            Type::Bool => self.context.bool_type().into(),
-            Type::String | Type::Unknown => self
-                .context
-                .ptr_type(inkwell::AddressSpace::default())
-                .into(),
-            _ => self.context.i64_type().into(),
-        }
+        self.type_to_llvm_basic(ty).into()
     }
 
     fn emit_and_link(&self, output_path: &str) -> Result<(), GBasicError> {
         Target::initialize_native(&InitializationConfig::default()).map_err(|e| {
             GBasicError::CodegenError {
-                message: format!("failed to init native target: {e}"),
+                span: None, message: format!("failed to init native target: {e}"),
             }
         })?;
 
         let triple = TargetMachine::get_default_triple();
         let target = Target::from_triple(&triple).map_err(|e| GBasicError::CodegenError {
-            message: format!("failed to get target: {e}"),
+            span: None, message: format!("failed to get target: {e}"),
         })?;
         let machine = target
             .create_target_machine(
@@ -944,7 +1496,7 @@ impl<'ctx> Codegen<'ctx> {
                 CodeModel::Default,
             )
             .ok_or_else(|| GBasicError::CodegenError {
-                message: "failed to create target machine".into(),
+                span: None, message: "failed to create target machine".into(),
             })?;
 
         let obj_path_str = format!("{output_path}.o");
@@ -952,7 +1504,7 @@ impl<'ctx> Codegen<'ctx> {
         machine
             .write_to_file(&self.module, FileType::Object, obj_path)
             .map_err(|e| GBasicError::CodegenError {
-                message: format!("failed to write object file: {e}"),
+                span: None, message: format!("failed to write object file: {e}"),
             })?;
 
         // Find workspace root: try exe dir ancestors, then CARGO_MANIFEST_DIR, then cwd
@@ -1038,12 +1590,12 @@ impl<'ctx> Codegen<'ctx> {
         }
 
         let status = cmd.status().map_err(|e| GBasicError::CodegenError {
-            message: format!("failed to run linker: {e}"),
+            span: None, message: format!("failed to run linker: {e}"),
         })?;
 
         if !status.success() {
             return Err(GBasicError::CodegenError {
-                message: format!("linking failed with status: {status}"),
+                span: None, message: format!("linking failed with status: {status}"),
             });
         }
 

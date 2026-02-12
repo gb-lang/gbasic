@@ -1,0 +1,38 @@
+// Particle effect — colored circles at mouse position
+Screen.Init(800, 600)
+
+let time = 0.0
+
+while true {
+    System.FrameBegin()
+    time = time + 0.02
+
+    let mx = Input.MouseX()
+    let my = Input.MouseY()
+
+    Screen.Clear(10, 10, 20)
+
+    // Draw particles in a burst pattern around the mouse
+    for i in 0..20 {
+        let angle = Math.Pi() * 2.0 * (i / 20.0) + time
+        let radius = Math.Sin(time * 3.0 + i) * 50.0 + 60.0
+        let px = mx + Math.Cos(angle) * radius
+        let py = my + Math.Sin(angle) * radius
+        let r = 100 + i * 7
+        let g = 50 + i * 5
+        let b = 200
+        Screen.DrawCircle(px, py, 4, r, g, b)
+    }
+
+    // Inner ring
+    for i in 0..10 {
+        let angle = Math.Pi() * 2.0 * (i / 10.0) - time * 2.0
+        let radius = 20.0
+        let px = mx + Math.Cos(angle) * radius
+        let py = my + Math.Sin(angle) * radius
+        Screen.DrawCircle(px, py, 3, 255, 200, 100)
+    }
+
+    Screen.Present()
+    System.FrameEnd()
+}

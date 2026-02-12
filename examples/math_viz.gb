@@ -1,0 +1,31 @@
+// Math visualization — animated sine wave
+Screen.Init(800, 400)
+
+let time = 0.0
+
+while true {
+    System.FrameBegin()
+    time = time + 0.03
+
+    Screen.Clear(20, 20, 30)
+
+    // Draw center line
+    Screen.DrawLine(0, 200, 800, 200, 60, 60, 60)
+
+    // Draw sine wave
+    for x in 0..800 {
+        let angle = time + x / 50.0
+        let y = Math.Sin(angle) * 80.0 + 200.0
+        Screen.SetPixel(x, y, 0, 200, 255)
+    }
+
+    // Draw cosine wave
+    for x in 0..800 {
+        let angle = time + x / 50.0
+        let y = Math.Cos(angle) * 60.0 + 200.0
+        Screen.SetPixel(x, y, 255, 100, 50)
+    }
+
+    Screen.Present()
+    System.FrameEnd()
+}

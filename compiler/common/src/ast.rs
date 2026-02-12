@@ -58,6 +58,24 @@ pub enum Statement {
     Block(Block),
 }
 
+impl Statement {
+    pub fn span(&self) -> Span {
+        match self {
+            Statement::Let { span, .. }
+            | Statement::If { span, .. }
+            | Statement::For { span, .. }
+            | Statement::While { span, .. }
+            | Statement::Match { span, .. }
+            | Statement::Return { span, .. }
+            | Statement::Break { span, .. }
+            | Statement::Continue { span, .. }
+            | Statement::Expression { span, .. } => *span,
+            Statement::Function(f) => f.span,
+            Statement::Block(b) => b.span,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Block {
     pub statements: Vec<Statement>,
@@ -150,6 +168,12 @@ pub enum Expression {
         parts: Vec<StringPart>,
         span: Span,
     },
+    /// Range expression: `start..end`
+    Range {
+        start: Box<Expression>,
+        end: Box<Expression>,
+        span: Span,
+    },
 }
 
 /// A part of an interpolated string.
@@ -174,7 +198,8 @@ impl Expression {
             | Expression::FieldAccess { span, .. }
             | Expression::Array { span, .. }
             | Expression::Assignment { span, .. }
-            | Expression::StringInterp { span, .. } => *span,
+            | Expression::StringInterp { span, .. }
+            | Expression::Range { span, .. } => *span,
         }
     }
 }

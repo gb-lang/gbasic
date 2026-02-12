@@ -9,12 +9,6 @@ pub enum Type {
     Bool,
     Void,
     Array(Box<Type>),
-    // Opaque handle types for runtime resources
-    Sprite,
-    Layer,
-    Sound,
-    Instrument,
-    Timer,
     /// A function type: (param_types) -> return_type
     Function {
         params: Vec<Type>,
@@ -33,11 +27,6 @@ impl std::fmt::Display for Type {
             Type::Bool => write!(f, "Bool"),
             Type::Void => write!(f, "Void"),
             Type::Array(inner) => write!(f, "[{inner}]"),
-            Type::Sprite => write!(f, "Sprite"),
-            Type::Layer => write!(f, "Layer"),
-            Type::Sound => write!(f, "Sound"),
-            Type::Instrument => write!(f, "Instrument"),
-            Type::Timer => write!(f, "Timer"),
             Type::Function { params, ret } => {
                 write!(f, "(")?;
                 for (i, p) in params.iter().enumerate() {

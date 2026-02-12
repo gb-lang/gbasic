@@ -1,5 +1,10 @@
 use clap::Parser as ClapParser;
+use codespan_reporting::diagnostic::{Diagnostic, Label};
+use codespan_reporting::files::SimpleFiles;
+use codespan_reporting::term;
+use codespan_reporting::term::termcolor::{ColorChoice, StandardStream};
 use colored::Colorize;
+use gbasic_common::error::GBasicError;
 use std::fs;
 use std::process;
 
@@ -34,6 +39,50 @@ struct Cli {
     /// Output binary path
     #[arg(short, long, default_value = "output")]
     output: String,
+
+    /// Run the compiled binary after successful compilation
+    #[arg(long)]
+    run: bool,
+}
+
+fn print_error(filename: &str, source: &str, err: &GBasicError) {
+    let mut files = SimpleFiles::new();
+    let file_id = files.add(filename, source);
+
+    let diagnostic = match err {
+        GBasicError::SyntaxError { message, span } |
+        GBasicError::TypeError { message, span } |
+        GBasicError::NameError { message, span } => {
+            let title = match err {
+                GBasicError::SyntaxError { .. } => "Syntax error",
+                GBasicError::TypeError { .. } => "Type error",
+                GBasicError::NameError { .. } => "Name error",
+                _ => unreachable!(),
+            };
+            Diagnostic::error()
+                .with_message(title)
+                .with_labels(vec![
+                    Label::primary(file_id, span.start..span.end).with_message(message),
+                ])
+        }
+        GBasicError::CodegenError { message, span } => {
+            let diag = Diagnostic::error().with_message("Codegen error");
+            if let Some(span) = span {
+                diag.with_labels(vec![
+                    Label::primary(file_id, span.start..span.end).with_message(message),
+                ])
+            } else {
+                diag.with_notes(vec![message.clone()])
+            }
+        }
+        GBasicError::InternalError { message } => {
+            Diagnostic::error().with_message(format!("Internal error: {message}"))
+        }
+    };
+
+    let writer = StandardStream::stderr(ColorChoice::Auto);
+    let config = term::Config::default();
+    let _ = term::emit(&mut writer.lock(), &config, &files, &diagnostic);
 }
 
 fn main() {
@@ -63,7 +112,7 @@ fn main() {
         Ok(p) => p,
         Err(errors) => {
             for err in &errors {
-                eprintln!("{}: {}", "error".red().bold(), err);
+                print_error(&file, &source, err);
             }
             process::exit(1);
         }
@@ -77,7 +126,7 @@ fn main() {
     // Type checking
     if !cli.skip_typecheck {
         if let Err(err) = gbasic_typechecker::check(&program) {
-            eprintln!("{}: {}", "type error".red().bold(), err);
+            print_error(&file, &source, &err);
             process::exit(1);
         }
     }
@@ -94,7 +143,7 @@ fn main() {
 
     // Code generation
     if let Err(err) = gbasic_irgen::codegen(&program, &cli.output, cli.dump_ir) {
-        eprintln!("{}: {}", "codegen error".red().bold(), err);
+        print_error(&file, &source, &err);
         process::exit(1);
     }
 
@@ -105,5 +154,16 @@ fn main() {
             file,
             cli.output
         );
+    }
+
+    // Run the binary if --run was specified
+    if cli.run && !cli.dump_ir {
+        let status = std::process::Command::new(&cli.output)
+            .status()
+            .unwrap_or_else(|e| {
+                eprintln!("{}: failed to run {}: {}", "error".red().bold(), cli.output, e);
+                process::exit(1);
+            });
+        process::exit(status.code().unwrap_or(1));
     }
 }

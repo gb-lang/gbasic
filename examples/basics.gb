@@ -31,12 +31,8 @@ if not alive {
 }
 
 // Loops
-let numbers = [1, 2, 3, 4, 5]
-for n in numbers {
+for n in [1, 2, 3, 4, 5] {
     if n % 2 == 0 {
         print("{n} is even")
     }
 }
-
-// Namespaces for hardware
-Screen.Layer(0).Clear(30, 60, 180).Draw()

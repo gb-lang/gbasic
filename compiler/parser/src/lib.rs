@@ -366,4 +366,57 @@ mod tests {
         let program = parse("if x && y || z { }").unwrap();
         assert_eq!(program.statements.len(), 1);
     }
+
+    #[test]
+    fn test_else_if() {
+        let program = parse("if x > 10 { } else if x > 5 { } else { }").unwrap();
+        assert_eq!(program.statements.len(), 1);
+        if let Statement::If { else_block: Some(eb), .. } = &program.statements[0] {
+            assert_eq!(eb.statements.len(), 1);
+            assert!(matches!(&eb.statements[0], Statement::If { else_block: Some(_), .. }));
+        } else {
+            panic!("expected if with else-if");
+        }
+    }
+
+    #[test]
+    fn test_range_expression() {
+        let program = parse("for i in 0..10 { }").unwrap();
+        if let Statement::For { iterable, .. } = &program.statements[0] {
+            assert!(matches!(iterable, Expression::Range { .. }));
+        } else {
+            panic!("expected for statement");
+        }
+    }
+
+    #[test]
+    fn test_dotdot_token() {
+        let tokens = gbasic_lexer::tokenize("0..10");
+        let kinds: Vec<_> = tokens.iter().map(|t| &t.token).collect();
+        assert_eq!(kinds, vec![
+            &gbasic_lexer::Token::Int(0),
+            &gbasic_lexer::Token::DotDot,
+            &gbasic_lexer::Token::Int(10),
+            &gbasic_lexer::Token::Eof,
+        ]);
+    }
+
+    #[test]
+    fn test_match_statement() {
+        let program = parse("match x { 1 -> { } 2 -> { } _ -> { } }").unwrap();
+        if let Statement::Match { arms, .. } = &program.statements[0] {
+            assert_eq!(arms.len(), 3);
+            assert!(matches!(&arms[2].pattern, Pattern::Wildcard(_)));
+        } else {
+            panic!("expected match");
+        }
+    }
+
+    #[test]
+    fn test_string_concat_parses() {
+        let program = parse(r#"let s = "a" + "b""#).unwrap();
+        if let Statement::Let { value, .. } = &program.statements[0] {
+            assert!(matches!(value, Expression::BinaryOp { op: BinaryOp::Add, .. }));
+        }
+    }
 }

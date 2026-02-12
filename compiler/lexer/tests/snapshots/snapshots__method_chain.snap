@@ -1,0 +1,76 @@
+---
+source: compiler/lexer/tests/snapshots.rs
+assertion_line: 12
+expression: tokens
+---
+[
+    SpannedToken {
+        token: Screen,
+        span: Span {
+            start: 0,
+            end: 6,
+        },
+    },
+    SpannedToken {
+        token: Dot,
+        span: Span {
+            start: 6,
+            end: 7,
+        },
+    },
+    SpannedToken {
+        token: Ident(
+            "init",
+        ),
+        span: Span {
+            start: 7,
+            end: 11,
+        },
+    },
+    SpannedToken {
+        token: LParen,
+        span: Span {
+            start: 11,
+            end: 12,
+        },
+    },
+    SpannedToken {
+        token: Int(
+            800,
+        ),
+        span: Span {
+            start: 12,
+            end: 15,
+        },
+    },
+    SpannedToken {
+        token: Comma,
+        span: Span {
+            start: 15,
+            end: 16,
+        },
+    },
+    SpannedToken {
+        token: Int(
+            600,
+        ),
+        span: Span {
+            start: 17,
+            end: 20,
+        },
+    },
+    SpannedToken {
+        token: RParen,
+        span: Span {
+            start: 20,
+            end: 21,
+        },
+    },
+    SpannedToken {
+        token: Eof,
+        span: Span {
+            start: 21,
+            end: 21,
+        },
+    },
+]

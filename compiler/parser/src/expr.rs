@@ -4,6 +4,31 @@ use gbasic_common::error::GBasicError;
 use gbasic_common::span::Span;
 use gbasic_lexer::Token;
 
+/// Define a left-associative binary operator parser function.
+macro_rules! define_binop_parser {
+    ($name:ident, $next:ident, $( $pat:pat => $op:expr ),+ $(,)?) => {
+        fn $name(&mut self) -> Result<Expression, GBasicError> {
+            let mut left = self.$next()?;
+            while matches!(self.current(), $( $pat )|+) {
+                let op = match self.current() {
+                    $( $pat => $op, )+
+                    _ => unreachable!(),
+                };
+                self.advance();
+                let right = self.$next()?;
+                let span = left.span().merge(right.span());
+                left = Expression::BinaryOp {
+                    left: Box::new(left),
+                    op,
+                    right: Box::new(right),
+                    span,
+                };
+            }
+            Ok(left)
+        }
+    };
+}
+
 impl Parser {
     /// Parse an expression using Pratt/precedence-climbing.
     pub fn parse_expression(&mut self) -> Result<Expression, GBasicError> {
@@ -12,6 +37,17 @@ impl Parser {
 
     fn parse_assignment(&mut self) -> Result<Expression, GBasicError> {
         let expr = self.parse_or()?;
+
+        if matches!(self.current(), Token::DotDot) {
+            self.advance();
+            let end = self.parse_or()?;
+            let span = expr.span().merge(end.span());
+            return Ok(Expression::Range {
+                start: Box::new(expr),
+                end: Box::new(end),
+                span,
+            });
+        }
 
         if matches!(self.current(), Token::Eq) {
             self.advance();
@@ -27,127 +63,36 @@ impl Parser {
         Ok(expr)
     }
 
-    fn parse_or(&mut self) -> Result<Expression, GBasicError> {
-        let mut left = self.parse_and()?;
-        while matches!(self.current(), Token::PipePipe | Token::Or) {
-            self.advance();
-            let right = self.parse_and()?;
-            let span = left.span().merge(right.span());
-            left = Expression::BinaryOp {
-                left: Box::new(left),
-                op: BinaryOp::Or,
-                right: Box::new(right),
-                span,
-            };
-        }
-        Ok(left)
-    }
+    define_binop_parser!(parse_or, parse_and,
+        Token::PipePipe | Token::Or => BinaryOp::Or
+    );
 
-    fn parse_and(&mut self) -> Result<Expression, GBasicError> {
-        let mut left = self.parse_equality()?;
-        while matches!(self.current(), Token::AmpAmp | Token::And) {
-            self.advance();
-            let right = self.parse_equality()?;
-            let span = left.span().merge(right.span());
-            left = Expression::BinaryOp {
-                left: Box::new(left),
-                op: BinaryOp::And,
-                right: Box::new(right),
-                span,
-            };
-        }
-        Ok(left)
-    }
+    define_binop_parser!(parse_and, parse_equality,
+        Token::AmpAmp | Token::And => BinaryOp::And
+    );
 
-    fn parse_equality(&mut self) -> Result<Expression, GBasicError> {
-        let mut left = self.parse_comparison()?;
-        while matches!(self.current(), Token::EqEq | Token::BangEq) {
-            let op = if matches!(self.current(), Token::EqEq) {
-                BinaryOp::Eq
-            } else {
-                BinaryOp::Neq
-            };
-            self.advance();
-            let right = self.parse_comparison()?;
-            let span = left.span().merge(right.span());
-            left = Expression::BinaryOp {
-                left: Box::new(left),
-                op,
-                right: Box::new(right),
-                span,
-            };
-        }
-        Ok(left)
-    }
+    define_binop_parser!(parse_equality, parse_comparison,
+        Token::EqEq => BinaryOp::Eq,
+        Token::BangEq => BinaryOp::Neq
+    );
 
-    fn parse_comparison(&mut self) -> Result<Expression, GBasicError> {
-        let mut left = self.parse_additive()?;
-        while matches!(
-            self.current(),
-            Token::Lt | Token::Gt | Token::LtEq | Token::GtEq
-        ) {
-            let op = match self.current() {
-                Token::Lt => BinaryOp::Lt,
-                Token::Gt => BinaryOp::Gt,
-                Token::LtEq => BinaryOp::Le,
-                Token::GtEq => BinaryOp::Ge,
-                _ => unreachable!(),
-            };
-            self.advance();
-            let right = self.parse_additive()?;
-            let span = left.span().merge(right.span());
-            left = Expression::BinaryOp {
-                left: Box::new(left),
-                op,
-                right: Box::new(right),
-                span,
-            };
-        }
-        Ok(left)
-    }
+    define_binop_parser!(parse_comparison, parse_additive,
+        Token::Lt => BinaryOp::Lt,
+        Token::Gt => BinaryOp::Gt,
+        Token::LtEq => BinaryOp::Le,
+        Token::GtEq => BinaryOp::Ge
+    );
 
-    fn parse_additive(&mut self) -> Result<Expression, GBasicError> {
-        let mut left = self.parse_multiplicative()?;
-        while matches!(self.current(), Token::Plus | Token::Minus) {
-            let op = if matches!(self.current(), Token::Plus) {
-                BinaryOp::Add
-            } else {
-                BinaryOp::Sub
-            };
-            self.advance();
-            let right = self.parse_multiplicative()?;
-            let span = left.span().merge(right.span());
-            left = Expression::BinaryOp {
-                left: Box::new(left),
-                op,
-                right: Box::new(right),
-                span,
-            };
-        }
-        Ok(left)
-    }
+    define_binop_parser!(parse_additive, parse_multiplicative,
+        Token::Plus => BinaryOp::Add,
+        Token::Minus => BinaryOp::Sub
+    );
 
-    fn parse_multiplicative(&mut self) -> Result<Expression, GBasicError> {
-        let mut left = self.parse_unary()?;
-        while matches!(self.current(), Token::Star | Token::Slash | Token::Percent) {
-            let op = match self.current() {
-                Token::Star => BinaryOp::Mul,
-                Token::Slash => BinaryOp::Div,
-                Token::Percent => BinaryOp::Mod,
-                _ => unreachable!(),
-            };
-            self.advance();
-            let right = self.parse_unary()?;
-            let span = left.span().merge(right.span());
-            left = Expression::BinaryOp {
-                left: Box::new(left),
-                op,
-                right: Box::new(right),
-                span,
-            };
-        }
-        Ok(left)
-    }
+    define_binop_parser!(parse_multiplicative, parse_unary,
+        Token::Star => BinaryOp::Mul,
+        Token::Slash => BinaryOp::Div,
+        Token::Percent => BinaryOp::Mod
+    );
 
     fn parse_unary(&mut self) -> Result<Expression, GBasicError> {
         match self.current() {

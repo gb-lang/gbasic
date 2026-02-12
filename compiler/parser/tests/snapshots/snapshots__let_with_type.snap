@@ -1,0 +1,25 @@
+---
+source: compiler/parser/tests/snapshots.rs
+expression: program
+---
+statements:
+  - Let:
+      name:
+        name: x
+        span:
+          start: 4
+          end: 5
+      type_ann: Int
+      value:
+        Literal:
+          kind:
+            Int: 42
+          span:
+            start: 13
+            end: 15
+      span:
+        start: 0
+        end: 15
+span:
+  start: 0
+  end: 15

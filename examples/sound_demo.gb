@@ -1,0 +1,28 @@
+// Sound demo — play beeps on keypress
+Screen.Init(400, 300)
+
+while true {
+    System.FrameBegin()
+
+    if Input.KeyPressed("1") {
+        Sound.Beep(440, 200)
+    }
+    if Input.KeyPressed("2") {
+        Sound.Beep(880, 200)
+    }
+    if Input.KeyPressed("3") {
+        Sound.Beep(220, 400)
+    }
+    if Input.KeyPressed("space") {
+        Sound.Beep(660, 100)
+    }
+
+    Screen.Clear(20, 20, 40)
+    // Draw a simple UI indicator
+    Screen.DrawRect(50, 50, 60, 60, 200, 50, 50)
+    Screen.DrawRect(150, 50, 60, 60, 50, 200, 50)
+    Screen.DrawRect(250, 50, 60, 60, 50, 50, 200)
+    Screen.Present()
+
+    System.FrameEnd()
+}

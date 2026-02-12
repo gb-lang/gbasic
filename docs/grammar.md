@@ -36,9 +36,9 @@ Note: Identifiers and keywords are normalized to lowercase during lexical analys
 ### Keywords
 
 ```ebnf
-keyword ::= "let" | "fn" | "if" | "else" | "for" | "in" | "while"
+keyword ::= "let" | "fun" | "fn" | "if" | "else" | "for" | "in" | "while"
           | "match" | "return" | "break" | "continue"
-          | "true" | "false"
+          | "true" | "false" | "and" | "or" | "not"
           | "int" | "float" | "string" | "bool" | "void"
 ```
 
@@ -61,7 +61,7 @@ exponent ::= ( "e" | "E" ) [ "+" | "-" ] digit { digit }
 
 string ::= '"' { string_char | escape_sequence } '"'
 string_char ::= any_char_except_quote_or_backslash
-escape_sequence ::= "\\" ( "n" | "t" | "r" | "\\" | '"' | "0" )
+escape_sequence ::= "\\" ( "n" | "t" | "\\" | '"' | "{" | "}" )
 
 boolean ::= "true" | "false"
 ```
@@ -71,9 +71,9 @@ boolean ::= "true" | "false"
 ```ebnf
 binary_op ::= "+" | "-" | "*" | "/" | "%"
             | "==" | "!=" | "<" | ">" | "<=" | ">="
-            | "&&" | "||"
+            | "&&" | "||" | "and" | "or"
 
-unary_op ::= "!" | "-"
+unary_op ::= "!" | "-" | "not"
 
 assignment_op ::= "="
 ```
@@ -118,7 +118,7 @@ let_statement ::= "let" identifier [ ":" type ] "=" expression statement_termina
 ### Function Declaration
 
 ```ebnf
-function_declaration ::= "fn" identifier "(" parameter_list ")" [ "->" type ] block
+function_declaration ::= ( "fun" | "fn" ) identifier "(" parameter_list ")" [ "->" type ] block
 
 parameter_list ::= [ parameter { "," parameter } ]
 parameter ::= identifier ":" type
@@ -381,3 +381,107 @@ String literals preserve case:
 ```gbasic
 let name = "Alice"  // "Alice" != "ALICE"
 ```
+
+## Range Expressions
+
+```ebnf
+range_expression ::= expression ".." expression
+```
+
+Range expressions produce a sequence of integers from start (inclusive) to end (exclusive):
+
+```gbasic
+for i in 0..10 {
+    print(i)  // prints 0 through 9
+}
+```
+
+## String Interpolation
+
+```ebnf
+string_interp ::= '"' { string_char | escape_sequence | "{" expression "}" } '"'
+```
+
+```gbasic
+let name = "World"
+print("Hello, {name}!")  // prints: Hello, World!
+```
+
+## Namespace API Reference
+
+### Screen
+
+| Method | Signature | Description |
+|--------|-----------|-------------|
+| Init | (width: Int, height: Int) | Initialize window |
+| Clear | (r: Int, g: Int, b: Int) | Clear screen with color |
+| SetPixel | (x: Int, y: Int, r: Int, g: Int, b: Int) | Draw a pixel |
+| DrawRect | (x: Int, y: Int, w: Int, h: Int, r: Int, g: Int, b: Int) | Draw filled rectangle |
+| DrawLine | (x1: Int, y1: Int, x2: Int, y2: Int, r: Int, g: Int, b: Int) | Draw line |
+| DrawCircle | (cx: Int, cy: Int, radius: Int, r: Int, g: Int, b: Int) | Draw filled circle |
+| Present | () | Present frame |
+| Width | () -> Int | Get window width |
+| Height | () -> Int | Get window height |
+| SpriteLoad | (path: String) -> Int | Load BMP sprite, returns handle |
+| SpriteAt | (handle: Int, x: Float, y: Float) -> Int | Set sprite position |
+| SpriteScale | (handle: Int, scale: Float) -> Int | Set sprite scale |
+| SpriteDraw | (handle: Int) | Draw sprite to screen |
+
+### Sound
+
+| Method | Signature | Description |
+|--------|-----------|-------------|
+| Beep | (freq: Int, dur: Int) | Play a beep (stub) |
+| EffectLoad | (path: String) -> Int | Load WAV sound effect |
+| EffectPlay | (path: String) | Play loaded sound effect |
+| EffectVolume | (path: String, volume: Float) | Set effect volume (0.0-1.0) |
+
+### Input
+
+| Method | Signature | Description |
+|--------|-----------|-------------|
+| Poll | () | Poll input events |
+| KeyPressed | (key: String) -> Bool | Check if key is pressed |
+| MouseX | () -> Int | Get mouse X position |
+| MouseY | () -> Int | Get mouse Y position |
+
+### Math
+
+| Method | Signature | Description |
+|--------|-----------|-------------|
+| Sin | (x: Float) -> Float | Sine |
+| Cos | (x: Float) -> Float | Cosine |
+| Sqrt | (x: Float) -> Float | Square root |
+| Abs | (x: Float) -> Float | Absolute value |
+| Floor | (x: Float) -> Float | Floor |
+| Ceil | (x: Float) -> Float | Ceiling |
+| Pow | (x: Float, y: Float) -> Float | Power |
+| Max | (a: Float, b: Float) -> Float | Maximum |
+| Min | (a: Float, b: Float) -> Float | Minimum |
+| Random | () -> Float | Random 0.0-1.0 |
+| Pi | () -> Float | Pi constant |
+
+### System
+
+| Method | Signature | Description |
+|--------|-----------|-------------|
+| Time | () -> Float | Unix timestamp |
+| Sleep | (ms: Int) | Sleep milliseconds |
+| Exit | (code: Int) | Exit program |
+| FrameBegin | () | Start frame (polls input) |
+| FrameEnd | () | End frame (targets 60 FPS) |
+| FrameTime | () -> Float | Last frame duration |
+
+### Memory
+
+| Method | Signature | Description |
+|--------|-----------|-------------|
+| Set | (key: String, value: Int) | Store integer value |
+| Get | (key: String) -> Int | Retrieve integer value |
+
+### IO
+
+| Method | Signature | Description |
+|--------|-----------|-------------|
+| ReadFile | (path: String) -> String | Read file contents |
+| WriteFile | (path: String, data: String) | Write to file |

@@ -13,7 +13,7 @@ pub enum GBasicError {
     NameError { message: String, span: Span },
 
     #[error("Codegen error: {message}")]
-    CodegenError { message: String },
+    CodegenError { message: String, span: Option<Span> },
 
     #[error("Internal compiler error: {message}")]
     InternalError { message: String },
@@ -25,6 +25,7 @@ impl GBasicError {
             GBasicError::SyntaxError { span, .. }
             | GBasicError::TypeError { span, .. }
             | GBasicError::NameError { span, .. } => Some(*span),
+            GBasicError::CodegenError { span, .. } => *span,
             _ => None,
         }
     }

@@ -1,0 +1,70 @@
+---
+source: compiler/parser/tests/snapshots.rs
+expression: program
+---
+statements:
+  - Expression:
+      expr:
+        MethodChain:
+          base: Screen
+          chain:
+            - method:
+                name: drawrect
+                span:
+                  start: 7
+                  end: 15
+              args:
+                - Literal:
+                    kind:
+                      Int: 10
+                    span:
+                      start: 16
+                      end: 18
+                - Literal:
+                    kind:
+                      Int: 20
+                    span:
+                      start: 20
+                      end: 22
+                - Literal:
+                    kind:
+                      Int: 100
+                    span:
+                      start: 24
+                      end: 27
+                - Literal:
+                    kind:
+                      Int: 50
+                    span:
+                      start: 29
+                      end: 31
+                - Literal:
+                    kind:
+                      Int: 255
+                    span:
+                      start: 33
+                      end: 36
+                - Literal:
+                    kind:
+                      Int: 0
+                    span:
+                      start: 38
+                      end: 39
+                - Literal:
+                    kind:
+                      Int: 0
+                    span:
+                      start: 41
+                      end: 42
+              span:
+                start: 7
+                end: 43
+          span:
+            start: 0
+            end: 43
+      span:
+        start: 0
+        end: 43
+span:
+  start: 0
+  end: 43

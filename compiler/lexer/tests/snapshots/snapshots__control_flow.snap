@@ -1,0 +1,77 @@
+---
+source: compiler/lexer/tests/snapshots.rs
+assertion_line: 24
+expression: tokens
+---
+[
+    SpannedToken {
+        token: If,
+        span: Span {
+            start: 0,
+            end: 2,
+        },
+    },
+    SpannedToken {
+        token: True,
+        span: Span {
+            start: 3,
+            end: 7,
+        },
+    },
+    SpannedToken {
+        token: LBrace,
+        span: Span {
+            start: 8,
+            end: 9,
+        },
+    },
+    SpannedToken {
+        token: Break,
+        span: Span {
+            start: 10,
+            end: 15,
+        },
+    },
+    SpannedToken {
+        token: RBrace,
+        span: Span {
+            start: 16,
+            end: 17,
+        },
+    },
+    SpannedToken {
+        token: Else,
+        span: Span {
+            start: 18,
+            end: 22,
+        },
+    },
+    SpannedToken {
+        token: LBrace,
+        span: Span {
+            start: 23,
+            end: 24,
+        },
+    },
+    SpannedToken {
+        token: Continue,
+        span: Span {
+            start: 25,
+            end: 33,
+        },
+    },
+    SpannedToken {
+        token: RBrace,
+        span: Span {
+            start: 34,
+            end: 35,
+        },
+    },
+    SpannedToken {
+        token: Eof,
+        span: Span {
+            start: 35,
+            end: 35,
+        },
+    },
+]

@@ -1,0 +1,36 @@
+// Math namespace
+let pi = Math.PI
+let angle = Math.Sin(pi / 4.0)
+print("sin(pi/4) = {angle}")
+print("sqrt(144) = {Math.Sqrt(144.0)}")
+print("2^10 = {Math.Pow(2.0, 10.0)}")
+print("random = {Math.Random()}")
+
+// System namespace
+let t = System.Time()
+print("time = {t}")
+System.Sleep(100)
+print("slept 100ms")
+
+// Memory namespace
+Memory.Set("score", 42)
+let score = Memory.Get("score")
+print("score = {score}")
+
+// IO namespace
+IO.WriteFile("test_output.txt", "Hello from G-Basic!")
+print("wrote file")
+
+// Screen namespace (opens window briefly)
+Screen.Init(400, 300)
+Screen.Clear(30, 60, 180)
+Screen.DrawRect(50, 50, 100, 80, 255, 0, 0)
+Screen.SetPixel(200, 150, 255, 255, 0)
+Screen.DrawLine(0, 0, 399, 299, 0, 255, 0)
+Screen.Present()
+System.Sleep(1000)
+
+// Sound namespace (stub)
+Sound.Beep(440, 200)
+
+print("All namespaces working!")

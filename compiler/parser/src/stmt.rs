@@ -110,7 +110,18 @@ impl Parser {
         self.skip_newlines();
         let else_block = if matches!(self.current(), Token::Else) {
             self.advance();
-            Some(self.parse_block()?)
+            self.skip_newlines();
+            if matches!(self.current(), Token::If) {
+                // else if → wrap recursive if-statement in a single-statement block
+                let if_stmt = self.parse_if()?;
+                let span = if_stmt.span();
+                Some(Block {
+                    statements: vec![if_stmt],
+                    span,
+                })
+            } else {
+                Some(self.parse_block()?)
+            }
         } else {
             None
         };

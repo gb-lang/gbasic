@@ -1,0 +1,15 @@
+// Arithmetic test
+let x = 1 + 2
+print(x)
+
+let y = 10 * 3
+print(y)
+
+fun add(a: Int, b: Int) -> Int {
+    return a + b
+}
+
+let z = add(100, 200)
+print(z)
+
+print("done!")

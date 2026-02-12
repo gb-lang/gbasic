@@ -83,6 +83,54 @@ pub extern "C" fn runtime_should_quit() -> i32 {
 }
 
 #[unsafe(no_mangle)]
+pub extern "C" fn runtime_print(s: *const std::ffi::c_char) {
+    if s.is_null() {
+        println!();
+        return;
+    }
+    let cstr = unsafe { std::ffi::CStr::from_ptr(s) };
+    if let Ok(s) = cstr.to_str() {
+        println!("{s}");
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn runtime_print_int(v: i64) {
+    println!("{v}");
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn runtime_print_float(v: f64) {
+    println!("{v}");
+}
+
+// No-newline variants for string interpolation
+#[unsafe(no_mangle)]
+pub extern "C" fn runtime_print_str_part(s: *const std::ffi::c_char) {
+    if !s.is_null() {
+        let cstr = unsafe { std::ffi::CStr::from_ptr(s) };
+        if let Ok(s) = cstr.to_str() {
+            print!("{s}");
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn runtime_print_int_part(v: i64) {
+    print!("{v}");
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn runtime_print_float_part(v: f64) {
+    print!("{v}");
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn runtime_print_newline() {
+    println!();
+}
+
+#[unsafe(no_mangle)]
 pub extern "C" fn runtime_shutdown() {
     SDL_STATE.with(|state| {
         *state.borrow_mut() = None;

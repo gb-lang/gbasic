@@ -18,6 +18,22 @@ struct Cli {
     /// Print tokens instead of compiling
     #[arg(long)]
     dump_tokens: bool,
+
+    /// Print LLVM IR instead of compiling
+    #[arg(long)]
+    dump_ir: bool,
+
+    /// Typecheck only (no codegen)
+    #[arg(long)]
+    check: bool,
+
+    /// Skip type checking
+    #[arg(long)]
+    skip_typecheck: bool,
+
+    /// Output binary path
+    #[arg(short, long, default_value = "output")]
+    output: String,
 }
 
 fn main() {
@@ -58,10 +74,36 @@ fn main() {
         return;
     }
 
-    println!(
-        "{}: compiled {} ({} statements)",
-        "ok".green().bold(),
-        file,
-        program.statements.len()
-    );
+    // Type checking
+    if !cli.skip_typecheck {
+        if let Err(err) = gbasic_typechecker::check(&program) {
+            eprintln!("{}: {}", "type error".red().bold(), err);
+            process::exit(1);
+        }
+    }
+
+    if cli.check {
+        println!(
+            "{}: {} type-checked ({} statements)",
+            "ok".green().bold(),
+            file,
+            program.statements.len()
+        );
+        return;
+    }
+
+    // Code generation
+    if let Err(err) = gbasic_irgen::codegen(&program, &cli.output, cli.dump_ir) {
+        eprintln!("{}: {}", "codegen error".red().bold(), err);
+        process::exit(1);
+    }
+
+    if !cli.dump_ir {
+        println!(
+            "{}: compiled {} -> {}",
+            "ok".green().bold(),
+            file,
+            cli.output
+        );
+    }
 }

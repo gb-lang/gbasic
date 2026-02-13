@@ -1,18 +1,15 @@
 // Flappy Bird — tap space to flap, avoid pipes
 
 let bird = circle(15)
-bird.position = Point(100, Screen.center.y)
+bird.position = Point(100, 300)
 bird.color = yellow
 bird.gravity = 0.5
 
-let ground = rect(Screen.width, 20)
-ground.position = Point(0, Screen.height - 20)
-ground.color = green
-ground.solid = true
-
-let pipes = []
 let score = 0
-let timer = 0
+let pipe_x = 800.0
+let gap_y = 250
+let pipe_speed = 3.0
+let passed = false
 
 while true {
     if key("space") {
@@ -20,46 +17,28 @@ while true {
         play("flap")
     }
 
-    // Spawn pipes
-    timer = timer + 1
-    if timer % 90 == 0 {
-        let gap_y = random(100, 400)
-
-        let top = rect(60, gap_y)
-        top.position = Point(Screen.width, 0)
-        top.color = green
-        top.velocity.x = -3
-        top.solid = true
-        pipes.add(top)
-
-        let bot = rect(60, Screen.height - gap_y - 150)
-        bot.position = Point(Screen.width, gap_y + 150)
-        bot.color = green
-        bot.velocity.x = -3
-        bot.solid = true
-        pipes.add(bot)
+    // Move pipe left
+    pipe_x = pipe_x - pipe_speed
+    if pipe_x < -60 {
+        pipe_x = 800.0
+        gap_y = random(100, 400)
+        passed = false
     }
 
-    // Collision with pipes or ground
-    for pipe in pipes {
-        if bird.collides(pipe) {
-            play("hit")
-            bird.position = Point(100, Screen.center.y)
-            bird.velocity.y = 0
-            score = 0
-        }
-        if pipe.position.x < -60 {
-            pipe.remove()
-            score = score + 1
-        }
+    // Score when passing pipe
+    if pipe_x < 100 and not passed {
+        score = score + 1
+        passed = true
     }
 
-    if bird.collides(ground) or bird.position.y < 0 {
+    // Bird hits ground or ceiling
+    if bird.position.y > 580 or bird.position.y < 0 {
         play("lose")
-        bird.position = Point(100, Screen.center.y)
+        bird.position = Point(100, 300)
         bird.velocity.y = 0
+        score = 0
     }
 
     clear(cyan)
-    print("Score: {score}").at(10, 10)
+    print("Score: {score}")
 }

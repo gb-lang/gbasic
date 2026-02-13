@@ -38,6 +38,39 @@ impl TypeChecker {
                 mutable: false,
             },
         );
+        // Layer 1 shortcuts
+        let builtins: &[(&str, Vec<Type>, Type)] = &[
+            ("rect", vec![Type::Unknown, Type::Unknown], Type::Int),
+            ("circle", vec![Type::Unknown], Type::Int),
+            ("key", vec![Type::String], Type::Bool),
+            ("play", vec![Type::String], Type::Void),
+            ("clear", vec![Type::Unknown], Type::Void),
+            ("random", vec![Type::Int, Type::Int], Type::Int),
+            ("point", vec![Type::Unknown, Type::Unknown], Type::Unknown),
+            ("color", vec![Type::Int, Type::Int, Type::Int], Type::Unknown),
+        ];
+        for (name, params, ret) in builtins {
+            self.symbols.insert(
+                (*name).into(),
+                Symbol {
+                    ty: Type::Function {
+                        params: params.clone(),
+                        ret: Box::new(ret.clone()),
+                    },
+                    mutable: false,
+                },
+            );
+        }
+        // Named colors as global constants
+        for color in &[
+            "black", "white", "red", "green", "blue", "yellow",
+            "orange", "purple", "pink", "cyan", "gray", "grey", "brown",
+        ] {
+            self.symbols.insert(
+                (*color).into(),
+                Symbol { ty: Type::Int, mutable: false },
+            );
+        }
     }
 
     fn check_statement(&mut self, stmt: &Statement) -> Result<(), GBasicError> {

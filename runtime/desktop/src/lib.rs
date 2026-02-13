@@ -3,10 +3,63 @@
 use sdl2::event::Event;
 use sdl2::pixels::Color;
 use sdl2::rect::{Point, Rect};
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::ffi::{CStr, CString};
 use std::time::Instant;
+
+// ─── Object System ───
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum ObjectKind {
+    Rect,
+    Circle,
+}
+
+#[derive(Debug, Clone)]
+struct GameObject {
+    kind: ObjectKind,
+    x: f64,
+    y: f64,
+    w: f64,
+    h: f64,
+    color_r: u8,
+    color_g: u8,
+    color_b: u8,
+    visible: bool,
+    layer: i64,
+    // Physics
+    vx: f64,
+    vy: f64,
+    gravity: f64,
+    solid: bool,
+    bounces: bool,
+    // State
+    alive: bool,
+}
+
+impl GameObject {
+    fn new(kind: ObjectKind, w: f64, h: f64) -> Self {
+        Self {
+            kind,
+            x: 0.0,
+            y: 0.0,
+            w,
+            h,
+            color_r: 255,
+            color_g: 255,
+            color_b: 255,
+            visible: true,
+            layer: 0,
+            vx: 0.0,
+            vy: 0.0,
+            gravity: 0.0,
+            solid: false,
+            bounces: false,
+            alive: true,
+        }
+    }
+}
 
 thread_local! {
     static SDL_STATE: RefCell<Option<SdlState>> = const { RefCell::new(None) };
@@ -15,6 +68,8 @@ thread_local! {
     static MEMORY_STORE: RefCell<HashMap<String, i64>> = RefCell::new(HashMap::new());
     static RNG_STATE: RefCell<u64> = const { RefCell::new(12345) };
     static SPRITE_HANDLES: RefCell<Vec<SpriteInfo>> = RefCell::new(Vec::new());
+    static OBJECTS: RefCell<Vec<GameObject>> = RefCell::new(Vec::new());
+    static SCREEN_AUTO_INIT: Cell<bool> = const { Cell::new(false) };
 }
 
 struct SpriteInfo {
@@ -559,4 +614,434 @@ pub extern "C" fn runtime_shutdown() {
     SDL_STATE.with(|state| {
         *state.borrow_mut() = None;
     });
+}
+
+// ─── Auto-init ───
+
+#[unsafe(no_mangle)]
+pub extern "C" fn ensure_screen_init() {
+    SCREEN_AUTO_INIT.with(|init| {
+        if !init.get() {
+            init.set(true);
+            SDL_STATE.with(|state| {
+                if state.borrow().is_none() {
+                    runtime_screen_init(800, 600);
+                }
+            });
+        }
+    });
+}
+
+// ─── Object constructors ───
+
+#[unsafe(no_mangle)]
+pub extern "C" fn runtime_create_rect(w: f64, h: f64) -> i64 {
+    ensure_screen_init();
+    OBJECTS.with(|objs| {
+        let mut objs = objs.borrow_mut();
+        let handle = objs.len() as i64;
+        objs.push(GameObject::new(ObjectKind::Rect, w, h));
+        handle
+    })
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn runtime_create_circle(r: f64) -> i64 {
+    ensure_screen_init();
+    OBJECTS.with(|objs| {
+        let mut objs = objs.borrow_mut();
+        let handle = objs.len() as i64;
+        // For circles, w=h=diameter, but we store radius in w
+        objs.push(GameObject::new(ObjectKind::Circle, r, r));
+        handle
+    })
+}
+
+// ─── Property setters ───
+
+fn with_object_mut(handle: i64, f: impl FnOnce(&mut GameObject)) {
+    OBJECTS.with(|objs| {
+        let mut objs = objs.borrow_mut();
+        if let Some(obj) = objs.get_mut(handle as usize) {
+            if obj.alive {
+                f(obj);
+            }
+        }
+    });
+}
+
+fn with_object<R: Default>(handle: i64, f: impl FnOnce(&GameObject) -> R) -> R {
+    OBJECTS.with(|objs| {
+        let objs = objs.borrow();
+        objs.get(handle as usize)
+            .filter(|o| o.alive)
+            .map(|o| f(o))
+            .unwrap_or_default()
+    })
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn runtime_set_position(handle: i64, x: f64, y: f64) {
+    with_object_mut(handle, |o| { o.x = x; o.y = y; });
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn runtime_set_position_x(handle: i64, x: f64) {
+    with_object_mut(handle, |o| { o.x = x; });
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn runtime_set_position_y(handle: i64, y: f64) {
+    with_object_mut(handle, |o| { o.y = y; });
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn runtime_set_color(handle: i64, r: i64, g: i64, b: i64) {
+    with_object_mut(handle, |o| {
+        o.color_r = r as u8;
+        o.color_g = g as u8;
+        o.color_b = b as u8;
+    });
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn runtime_set_visible(handle: i64, v: i64) {
+    with_object_mut(handle, |o| { o.visible = v != 0; });
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn runtime_set_velocity(handle: i64, vx: f64, vy: f64) {
+    with_object_mut(handle, |o| { o.vx = vx; o.vy = vy; });
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn runtime_set_velocity_x(handle: i64, vx: f64) {
+    with_object_mut(handle, |o| { o.vx = vx; });
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn runtime_set_velocity_y(handle: i64, vy: f64) {
+    with_object_mut(handle, |o| { o.vy = vy; });
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn runtime_set_gravity(handle: i64, g: f64) {
+    with_object_mut(handle, |o| { o.gravity = g; });
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn runtime_set_solid(handle: i64, v: i64) {
+    with_object_mut(handle, |o| { o.solid = v != 0; });
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn runtime_set_bounces(handle: i64, v: i64) {
+    with_object_mut(handle, |o| { o.bounces = v != 0; });
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn runtime_set_layer(handle: i64, l: i64) {
+    with_object_mut(handle, |o| { o.layer = l; });
+}
+
+// ─── Property getters ───
+
+#[unsafe(no_mangle)]
+pub extern "C" fn runtime_get_position_x(handle: i64) -> f64 {
+    with_object(handle, |o| o.x)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn runtime_get_position_y(handle: i64) -> f64 {
+    with_object(handle, |o| o.y)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn runtime_get_velocity_x(handle: i64) -> f64 {
+    with_object(handle, |o| o.vx)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn runtime_get_velocity_y(handle: i64) -> f64 {
+    with_object(handle, |o| o.vy)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn runtime_get_size_width(handle: i64) -> f64 {
+    with_object(handle, |o| o.w)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn runtime_get_size_height(handle: i64) -> f64 {
+    with_object(handle, |o| o.h)
+}
+
+// ─── Object methods ───
+
+#[unsafe(no_mangle)]
+pub extern "C" fn runtime_object_move(handle: i64, dx: f64, dy: f64) {
+    with_object_mut(handle, |o| { o.x += dx; o.y += dy; });
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn runtime_object_collides(h1: i64, h2: i64) -> i64 {
+    OBJECTS.with(|objs| {
+        let objs = objs.borrow();
+        let a = match objs.get(h1 as usize) {
+            Some(o) if o.alive => o,
+            _ => return 0,
+        };
+        let b = match objs.get(h2 as usize) {
+            Some(o) if o.alive => o,
+            _ => return 0,
+        };
+        // AABB collision
+        let (ax1, ay1, ax2, ay2) = obj_bounds(a);
+        let (bx1, by1, bx2, by2) = obj_bounds(b);
+        if ax1 < bx2 && ax2 > bx1 && ay1 < by2 && ay2 > by1 { 1 } else { 0 }
+    })
+}
+
+fn obj_bounds(o: &GameObject) -> (f64, f64, f64, f64) {
+    match o.kind {
+        ObjectKind::Rect => (o.x, o.y, o.x + o.w, o.y + o.h),
+        ObjectKind::Circle => {
+            let r = o.w; // radius stored in w
+            (o.x - r, o.y - r, o.x + r, o.y + r)
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn runtime_object_contains(handle: i64, x: f64, y: f64) -> i64 {
+    with_object(handle, |o| {
+        let (x1, y1, x2, y2) = obj_bounds(o);
+        if x >= x1 && x <= x2 && y >= y1 && y <= y2 { 1 } else { 0 }
+    })
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn runtime_object_remove(handle: i64) {
+    with_object_mut(handle, |o| { o.alive = false; });
+}
+
+// ─── Physics step ───
+
+#[unsafe(no_mangle)]
+pub extern "C" fn runtime_physics_step() {
+    let (screen_w, screen_h) = SDL_STATE.with(|state| {
+        state.borrow().as_ref().map(|s| (s.width as f64, s.height as f64)).unwrap_or((800.0, 600.0))
+    });
+
+    OBJECTS.with(|objs| {
+        let mut objs = objs.borrow_mut();
+        for obj in objs.iter_mut() {
+            if !obj.alive || (!obj.visible) {
+                continue;
+            }
+            // Apply gravity
+            obj.vy += obj.gravity;
+            // Apply velocity
+            obj.x += obj.vx;
+            obj.y += obj.vy;
+            // Bouncing off screen edges
+            if obj.bounces {
+                let (x1, y1, x2, y2) = match obj.kind {
+                    ObjectKind::Rect => (obj.x, obj.y, obj.x + obj.w, obj.y + obj.h),
+                    ObjectKind::Circle => {
+                        let r = obj.w;
+                        (obj.x - r, obj.y - r, obj.x + r, obj.y + r)
+                    }
+                };
+                if x1 <= 0.0 || x2 >= screen_w {
+                    obj.vx = -obj.vx;
+                    // Clamp back inside
+                    if x1 <= 0.0 {
+                        obj.x -= x1;
+                    }
+                    if x2 >= screen_w {
+                        obj.x -= x2 - screen_w;
+                    }
+                }
+                if y1 <= 0.0 || y2 >= screen_h {
+                    obj.vy = -obj.vy;
+                    if y1 <= 0.0 {
+                        obj.y -= y1;
+                    }
+                    if y2 >= screen_h {
+                        obj.y -= y2 - screen_h;
+                    }
+                }
+            }
+        }
+
+        // Bounce off solid objects
+        let len = objs.len();
+        for i in 0..len {
+            if !objs[i].alive || !objs[i].bounces {
+                continue;
+            }
+            for j in 0..len {
+                if i == j || !objs[j].alive || !objs[j].solid {
+                    continue;
+                }
+                let (ax1, ay1, ax2, ay2) = obj_bounds(&objs[i]);
+                let (bx1, by1, bx2, by2) = obj_bounds(&objs[j]);
+                if ax1 < bx2 && ax2 > bx1 && ay1 < by2 && ay2 > by1 {
+                    // Compute overlap on each axis to determine bounce direction
+                    let overlap_x = (ax2.min(bx2) - ax1.max(bx1)).min(ax2 - ax1);
+                    let overlap_y = (ay2.min(by2) - ay1.max(by1)).min(ay2 - ay1);
+                    if overlap_x < overlap_y {
+                        objs[i].vx = -objs[i].vx;
+                        if objs[i].x < objs[j].x {
+                            objs[i].x -= overlap_x;
+                        } else {
+                            objs[i].x += overlap_x;
+                        }
+                    } else {
+                        objs[i].vy = -objs[i].vy;
+                        if objs[i].y < objs[j].y {
+                            objs[i].y -= overlap_y;
+                        } else {
+                            objs[i].y += overlap_y;
+                        }
+                    }
+                }
+            }
+        }
+    });
+}
+
+// ─── Auto-draw ───
+
+#[unsafe(no_mangle)]
+pub extern "C" fn runtime_auto_draw() {
+    // Collect objects sorted by layer, then draw
+    OBJECTS.with(|objs| {
+        let objs = objs.borrow();
+        // Build sorted index list by layer then creation order
+        let mut indices: Vec<usize> = (0..objs.len())
+            .filter(|&i| objs[i].alive && objs[i].visible)
+            .collect();
+        indices.sort_by_key(|&i| objs[i].layer);
+
+        for &i in &indices {
+            let o = &objs[i];
+            let c = Color::RGB(o.color_r, o.color_g, o.color_b);
+            match o.kind {
+                ObjectKind::Rect => {
+                    with_sdl_mut(|s| {
+                        s.canvas.set_draw_color(c);
+                        let _ = s.canvas.fill_rect(Rect::new(
+                            o.x as i32,
+                            o.y as i32,
+                            o.w as u32,
+                            o.h as u32,
+                        ));
+                    });
+                }
+                ObjectKind::Circle => {
+                    let r = o.w as i64;
+                    with_sdl_mut(|s| {
+                        s.canvas.set_draw_color(c);
+                        let cx = o.x as i32;
+                        let cy = o.y as i32;
+                        let mut px = r as i32;
+                        let mut py = 0i32;
+                        let mut d = 1 - px;
+                        while px >= py {
+                            let _ = s.canvas.draw_line(Point::new(cx - px, cy + py), Point::new(cx + px, cy + py));
+                            let _ = s.canvas.draw_line(Point::new(cx - px, cy - py), Point::new(cx + px, cy - py));
+                            let _ = s.canvas.draw_line(Point::new(cx - py, cy + px), Point::new(cx + py, cy + px));
+                            let _ = s.canvas.draw_line(Point::new(cx - py, cy - px), Point::new(cx + py, cy - px));
+                            py += 1;
+                            if d <= 0 {
+                                d += 2 * py + 1;
+                            } else {
+                                px -= 1;
+                                d += 2 * (py - px) + 1;
+                            }
+                        }
+                    });
+                }
+            }
+        }
+    });
+}
+
+// ─── Frame auto (implicit game loop) ───
+
+#[unsafe(no_mangle)]
+pub extern "C" fn runtime_frame_auto() {
+    // 1. Poll input
+    runtime_input_poll();
+    // 2. Check for quit
+    let should_quit = SDL_STATE.with(|state| {
+        state.borrow().as_ref().map(|s| s.should_quit).unwrap_or(false)
+    });
+    if should_quit {
+        std::process::exit(0);
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn runtime_frame_auto_end() {
+    // 1. Physics step
+    runtime_physics_step();
+    // 2. Auto-draw all objects
+    runtime_auto_draw();
+    // 3. Present
+    runtime_screen_present();
+    // 4. Frame timing (60 FPS)
+    with_sdl_mut(|s| {
+        let elapsed = s.frame_start.elapsed();
+        s.delta_time = elapsed.as_secs_f64();
+        let target = std::time::Duration::from_micros(16667);
+        if elapsed < target {
+            std::thread::sleep(target - elapsed);
+        }
+        s.frame_start = Instant::now();
+    });
+}
+
+// ─── Screen center properties ───
+
+#[unsafe(no_mangle)]
+pub extern "C" fn runtime_screen_center_x() -> f64 {
+    SDL_STATE.with(|state| {
+        state.borrow().as_ref().map(|s| s.width as f64 / 2.0).unwrap_or(400.0)
+    })
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn runtime_screen_center_y() -> f64 {
+    SDL_STATE.with(|state| {
+        state.borrow().as_ref().map(|s| s.height as f64 / 2.0).unwrap_or(300.0)
+    })
+}
+
+// ─── Random range ───
+
+#[unsafe(no_mangle)]
+pub extern "C" fn runtime_math_random_range(min: i64, max: i64) -> i64 {
+    if min >= max {
+        return min;
+    }
+    RNG_STATE.with(|rng| {
+        let mut state = rng.borrow_mut();
+        let mut x = *state;
+        x ^= x << 13;
+        x ^= x >> 7;
+        x ^= x << 17;
+        *state = x;
+        min + ((x as i64).abs() % (max - min + 1))
+    })
+}
+
+// ─── Screen clear with named color support ───
+
+#[unsafe(no_mangle)]
+pub extern "C" fn runtime_screen_clear_color(r: i64, g: i64, b: i64) {
+    ensure_screen_init();
+    runtime_screen_clear(r, g, b);
 }

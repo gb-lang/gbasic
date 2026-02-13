@@ -1,14 +1,15 @@
 // Pong — a simple paddle + ball game
 
 let paddle = rect(100, 20)
-paddle.position = Point(350, 550)
+paddle.position = Screen.bottom_center
+paddle.position.y = paddle.position.y - 30
 paddle.color = white
 paddle.solid = true
 
 let ball = circle(10)
-ball.position = Point(400, 300)
+ball.position = Screen.center
 ball.color = yellow
-ball.velocity = Point(3, 3)
+ball.velocity = (3, 3)
 ball.bounces = true
 
 let score = 0
@@ -18,9 +19,9 @@ while true {
     if key("right") { paddle.move(8, 0) }
 
     // Ball fell off bottom — reset
-    if ball.position.y > 600 {
-        ball.position = Point(400, 300)
-        ball.velocity = Point(3, 3)
+    if ball.position.y > Screen.height {
+        ball.position = Screen.center
+        ball.velocity = (3, 3)
         score = 0
         play("lose")
     }
@@ -32,5 +33,5 @@ while true {
     }
 
     clear(black)
-    print("Score: {score}")
+    print("Score: {score}").at(10, 10)
 }

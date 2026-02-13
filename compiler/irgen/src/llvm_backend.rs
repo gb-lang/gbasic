@@ -803,9 +803,44 @@ impl<'ctx> Codegen<'ctx> {
             return Ok(());
         }
 
-        Err(GBasicError::CodegenError {
-            span: Some(iterable.span()), message: "for-loop iterable must be a range (start..end) or array literal".into(),
-        })
+        // Dynamic array iteration: codegen iterable as a handle, iterate with index counter
+        let arr_handle = self.codegen_expression(iterable)?.unwrap();
+        let len = self.call_runtime("runtime_array_length", &[LType::I64], LType::I64, &[arr_handle.into()]).unwrap().into_int_value();
+
+        let idx_alloca = self.builder.build_alloca(i64_type, "idx").unwrap();
+        self.builder.build_store(idx_alloca, i64_type.const_int(0, false)).unwrap();
+        let var_alloca = self.builder.build_alloca(i64_type, &variable.name).unwrap();
+
+        let (cond_bb, body_bb, inc_bb, exit_bb) = self.make_loop_blocks();
+
+        self.builder.build_unconditional_branch(cond_bb).unwrap();
+        self.builder.position_at_end(cond_bb);
+        let idx = self.builder.build_load(i64_type, idx_alloca, "idx").unwrap().into_int_value();
+        // Re-read length each iteration (array may change during loop)
+        let cur_len = self.call_runtime("runtime_array_length", &[LType::I64], LType::I64, &[arr_handle.into()]).unwrap().into_int_value();
+        let cond = self.builder.build_int_compare(
+            inkwell::IntPredicate::SLT, idx, cur_len, "for_cond"
+        ).unwrap();
+        self.builder.build_conditional_branch(cond, body_bb, exit_bb).unwrap();
+
+        self.builder.position_at_end(body_bb);
+        let idx_val = self.builder.build_load(i64_type, idx_alloca, "idx").unwrap().into_int_value();
+        let elem_val = self.call_runtime("runtime_array_get", &[LType::I64, LType::I64], LType::I64, &[arr_handle.into(), idx_val.into()]).unwrap();
+        self.builder.build_store(var_alloca, elem_val).unwrap();
+
+        self.codegen_loop_body(&variable.name, var_alloca, Type::Int, body, inc_bb, exit_bb)?;
+
+        self.builder.position_at_end(inc_bb);
+        let next_idx = self.builder.build_int_add(
+            self.builder.build_load(i64_type, idx_alloca, "idx").unwrap().into_int_value(),
+            i64_type.const_int(1, false),
+            "inc"
+        ).unwrap();
+        self.builder.build_store(idx_alloca, next_idx).unwrap();
+        self.builder.build_unconditional_branch(cond_bb).unwrap();
+
+        self.builder.position_at_end(exit_bb);
+        Ok(())
     }
 
     fn codegen_match(
@@ -1087,8 +1122,8 @@ impl<'ctx> Codegen<'ctx> {
         elements: &[Expression],
     ) -> Result<Option<BasicValueEnum<'ctx>>, GBasicError> {
         if elements.is_empty() {
-            let null = self.context.ptr_type(inkwell::AddressSpace::default()).const_null();
-            return Ok(Some(null.into()));
+            // Empty array → dynamic array handle
+            return Ok(self.call_runtime("runtime_array_new", &[], LType::I64, &[]));
         }
 
         let elem_ty = self.infer_expr_type(&elements[0]);
@@ -1194,6 +1229,7 @@ impl<'ctx> Codegen<'ctx> {
         chain: &[MethodCall],
     ) -> Result<Option<BasicValueEnum<'ctx>>, GBasicError> {
         let mut last_result: Option<BasicValueEnum<'ctx>> = None;
+        let mut last_screen_pos: Option<String> = None;
 
         for call in chain {
             let method_name = &call.method.name; // already lowercased by lexer
@@ -1201,15 +1237,36 @@ impl<'ctx> Codegen<'ctx> {
             // Handle Screen properties that aren't in the namespace table
             if namespace == NamespaceRef::Screen {
                 match method_name.as_str() {
-                    "center" => {
-                        // Return center_x as the value (center.y handled via FieldAccess)
+                    "center" | "bottom_center" | "top_center" | "top_left" | "top_right"
+                    | "bottom_left" | "bottom_right" => {
                         self.call_runtime("ensure_screen_init", &[], LType::Void, &[]);
+                        last_screen_pos = Some(method_name.clone());
                         last_result = self.call_runtime("runtime_screen_center_x", &[], LType::F64, &[]);
                         continue;
                     }
-                    "bottom_center" => {
-                        self.call_runtime("ensure_screen_init", &[], LType::Void, &[]);
-                        last_result = self.call_runtime("runtime_screen_center_x", &[], LType::F64, &[]);
+                    // .x / .y after a Screen position property (e.g., Screen.center.y)
+                    "x" | "y" if last_screen_pos.is_some() => {
+                        let pos_name = last_screen_pos.as_deref().unwrap();
+                        let f64_type = self.context.f64_type();
+                        last_result = Some(match (pos_name, method_name.as_str()) {
+                            ("center", "x") | ("top_center", "x") | ("bottom_center", "x") =>
+                                self.call_runtime("runtime_screen_center_x", &[], LType::F64, &[]).unwrap(),
+                            ("center", "y") =>
+                                self.call_runtime("runtime_screen_center_y", &[], LType::F64, &[]).unwrap(),
+                            ("bottom_center", "y") | ("bottom_left", "y") | ("bottom_right", "y") => {
+                                let h = self.call_runtime("runtime_screen_height", &[], LType::I64, &[]).unwrap();
+                                self.builder.build_signed_int_to_float(h.into_int_value(), f64_type, "hf").unwrap().into()
+                            }
+                            ("top_left", "x") | ("top_left", "y") | ("top_center", "y")
+                            | ("bottom_left", "x") => f64_type.const_float(0.0).into(),
+                            ("top_right", "x") | ("bottom_right", "x") => {
+                                let w = self.call_runtime("runtime_screen_width", &[], LType::I64, &[]).unwrap();
+                                self.builder.build_signed_int_to_float(w.into_int_value(), f64_type, "wf").unwrap().into()
+                            }
+                            ("top_right", "y") => f64_type.const_float(0.0).into(),
+                            _ => self.call_runtime("runtime_screen_center_x", &[], LType::F64, &[]).unwrap(),
+                        });
+                        last_screen_pos = None;
                         continue;
                     }
                     _ => {}
@@ -1273,6 +1330,16 @@ impl<'ctx> Codegen<'ctx> {
     ) -> Result<Option<BasicValueEnum<'ctx>>, GBasicError> {
         // Handle method calls on objects: obj.method(args)
         if let Expression::FieldAccess { object, field, .. } = callee {
+            // Special: print("text").at(x, y) → draw text on screen
+            if field.name == "at" && args.len() == 2 {
+                if let Expression::Call { callee: inner_callee, args: print_args, .. } = object.as_ref() {
+                    if let Expression::Identifier(id) = inner_callee.as_ref() {
+                        if id.name == "print" && print_args.len() == 1 {
+                            return self.codegen_print_at(&print_args[0], &args[0], &args[1]);
+                        }
+                    }
+                }
+            }
             return self.codegen_object_method(object, &field.name, args);
         }
 
@@ -1448,6 +1515,107 @@ impl<'ctx> Codegen<'ctx> {
         let val = self.codegen_expression(arg)?;
         self.emit_typed_print_call(val, &arg_ty, "");
         Ok(None)
+    }
+
+    /// print("text").at(x, y) → render text on screen at position
+    fn codegen_print_at(
+        &mut self,
+        text_arg: &Expression,
+        x_arg: &Expression,
+        y_arg: &Expression,
+    ) -> Result<Option<BasicValueEnum<'ctx>>, GBasicError> {
+        // Build the string to display
+        let text_ptr = if let Expression::StringInterp { parts, .. } = text_arg {
+            // Build concatenated string via runtime_string_concat
+            self.build_interp_string(parts)?
+        } else {
+            let val = self.codegen_expression(text_arg)?;
+            match self.infer_expr_type(text_arg) {
+                Type::String | Type::Unknown => val.unwrap(),
+                _ => {
+                    // Convert to string representation — for MVP just print int/float to stdout
+                    // and return empty string for screen
+                    let global = self.builder.build_global_string_ptr("", "empty").unwrap();
+                    global.as_pointer_value().into()
+                }
+            }
+        };
+
+        let x = self.codegen_expression(x_arg)?.unwrap();
+        let y = self.codegen_expression(y_arg)?.unwrap();
+        let xi = self.coerce_to_ltype(x, &self.infer_expr_type(x_arg), LType::I64)?;
+        let yi = self.coerce_to_ltype(y, &self.infer_expr_type(y_arg), LType::I64)?;
+
+        // Draw white text by default
+        let i64_type = self.context.i64_type();
+        let white = i64_type.const_int(255, false);
+        self.call_runtime(
+            "runtime_draw_text",
+            &[LType::Ptr, LType::I64, LType::I64, LType::I64, LType::I64, LType::I64],
+            LType::Void,
+            &[text_ptr.into(), xi.into(), yi.into(), white.into(), white.into(), white.into()],
+        );
+        Ok(None)
+    }
+
+    /// Build an interpolated string into a single runtime string pointer.
+    fn build_interp_string(
+        &mut self,
+        parts: &[StringPart],
+    ) -> Result<BasicValueEnum<'ctx>, GBasicError> {
+        let concat_fn = self.module.get_function("runtime_string_concat").unwrap();
+        let mut result: Option<BasicValueEnum<'ctx>> = None;
+
+        for part in parts {
+            let part_str = match part {
+                StringPart::Lit(s) => {
+                    let global = self.builder.build_global_string_ptr(s, "str_part").unwrap();
+                    global.as_pointer_value().into()
+                }
+                StringPart::Expr(e) => {
+                    let ty = self.infer_expr_type(e);
+                    let val = self.codegen_expression(e)?;
+                    match ty {
+                        Type::String | Type::Unknown => val.unwrap(),
+                        Type::Int => {
+                            // Convert int to string via snprintf-like approach
+                            // For MVP, use a runtime helper or just format
+                            // Actually, let's use runtime_int_to_str
+                            let v = val.unwrap();
+                            self.call_runtime("runtime_int_to_str", &[LType::I64], LType::Ptr, &[v.into()])
+                                .unwrap_or_else(|| {
+                                    self.builder.build_global_string_ptr("?", "fallback").unwrap().as_pointer_value().into()
+                                })
+                        }
+                        Type::Float => {
+                            let v = val.unwrap();
+                            self.call_runtime("runtime_float_to_str", &[LType::F64], LType::Ptr, &[v.into()])
+                                .unwrap_or_else(|| {
+                                    self.builder.build_global_string_ptr("?", "fallback").unwrap().as_pointer_value().into()
+                                })
+                        }
+                        _ => {
+                            self.builder.build_global_string_ptr("?", "fallback").unwrap().as_pointer_value().into()
+                        }
+                    }
+                }
+            };
+
+            result = Some(match result {
+                None => part_str,
+                Some(prev) => {
+                    self.builder.build_call(concat_fn, &[prev.into(), part_str.into()], "concat")
+                        .unwrap()
+                        .try_as_basic_value()
+                        .left()
+                        .unwrap()
+                }
+            });
+        }
+
+        Ok(result.unwrap_or_else(|| {
+            self.builder.build_global_string_ptr("", "empty").unwrap().as_pointer_value().into()
+        }))
     }
 
     fn codegen_int_binop(
@@ -1750,28 +1918,54 @@ impl<'ctx> Codegen<'ctx> {
                         }
                     }
                 }
-                // Fallback: try to evaluate as a "packed point" (not implemented yet)
-                // For Screen.center, etc., handle in MethodChain
+                // Handle Screen.center, Screen.bottom_center, etc. as position values
                 if let Expression::MethodChain { base, chain, .. } = value {
-                    // Handle Screen.center, Screen.bottom_center, etc.
                     if *base == NamespaceRef::Screen {
                         if let Some(last) = chain.last() {
-                            match last.method.name.as_str() {
+                            let f64_type = self.context.f64_type();
+                            let zero = f64_type.const_float(0.0);
+                            let (px, py) = match last.method.name.as_str() {
                                 "center" => {
                                     let cx = self.call_runtime("runtime_screen_center_x", &[], LType::F64, &[]).unwrap();
                                     let cy = self.call_runtime("runtime_screen_center_y", &[], LType::F64, &[]).unwrap();
-                                    self.call_runtime("runtime_set_position", &[LType::I64, LType::F64, LType::F64], LType::Void, &[h, cx.into(), cy.into()]);
-                                    return Ok(None);
+                                    (cx, cy)
                                 }
                                 "bottom_center" => {
                                     let cx = self.call_runtime("runtime_screen_center_x", &[], LType::F64, &[]).unwrap();
                                     let sh = self.call_runtime("runtime_screen_height", &[], LType::I64, &[]).unwrap();
-                                    let shy = self.builder.build_signed_int_to_float(sh.into_int_value(), self.context.f64_type(), "sh").unwrap();
-                                    self.call_runtime("runtime_set_position", &[LType::I64, LType::F64, LType::F64], LType::Void, &[h, cx.into(), shy.into()]);
-                                    return Ok(None);
+                                    let shy = self.builder.build_signed_int_to_float(sh.into_int_value(), f64_type, "sh").unwrap();
+                                    (cx, shy.into())
                                 }
-                                _ => {}
-                            }
+                                "top_center" => {
+                                    let cx = self.call_runtime("runtime_screen_center_x", &[], LType::F64, &[]).unwrap();
+                                    (cx, zero.into())
+                                }
+                                "top_left" => (zero.into(), zero.into()),
+                                "top_right" => {
+                                    let sw = self.call_runtime("runtime_screen_width", &[], LType::I64, &[]).unwrap();
+                                    let swf = self.builder.build_signed_int_to_float(sw.into_int_value(), f64_type, "sw").unwrap();
+                                    (swf.into(), zero.into())
+                                }
+                                "bottom_left" => {
+                                    let sh = self.call_runtime("runtime_screen_height", &[], LType::I64, &[]).unwrap();
+                                    let shy = self.builder.build_signed_int_to_float(sh.into_int_value(), f64_type, "sh").unwrap();
+                                    (zero.into(), shy.into())
+                                }
+                                "bottom_right" => {
+                                    let sw = self.call_runtime("runtime_screen_width", &[], LType::I64, &[]).unwrap();
+                                    let sh = self.call_runtime("runtime_screen_height", &[], LType::I64, &[]).unwrap();
+                                    let swf = self.builder.build_signed_int_to_float(sw.into_int_value(), f64_type, "sw").unwrap();
+                                    let shy = self.builder.build_signed_int_to_float(sh.into_int_value(), f64_type, "sh").unwrap();
+                                    (swf.into(), shy.into())
+                                }
+                                _ => {
+                                    return Err(GBasicError::CodegenError {
+                                        span: Some(span), message: format!("unknown Screen property '{}'", last.method.name),
+                                    });
+                                }
+                            };
+                            self.call_runtime("runtime_set_position", &[LType::I64, LType::F64, LType::F64], LType::Void, &[h, px.into(), py.into()]);
+                            return Ok(None);
                         }
                     }
                 }
@@ -1909,11 +2103,22 @@ impl<'ctx> Codegen<'ctx> {
                         match (last.method.name.as_str(), field.name.as_str()) {
                             ("center", "x") => return Ok(self.call_runtime("runtime_screen_center_x", &[], LType::F64, &[])),
                             ("center", "y") => return Ok(self.call_runtime("runtime_screen_center_y", &[], LType::F64, &[])),
-                            ("bottom_center", "x") => return Ok(self.call_runtime("runtime_screen_center_x", &[], LType::F64, &[])),
-                            ("bottom_center", "y") => {
+                            ("bottom_center", "x") | ("top_center", "x") => return Ok(self.call_runtime("runtime_screen_center_x", &[], LType::F64, &[])),
+                            ("bottom_center", "y") | ("bottom_left", "y") | ("bottom_right", "y") => {
                                 let h = self.call_runtime("runtime_screen_height", &[], LType::I64, &[]).unwrap();
                                 let hf = self.builder.build_signed_int_to_float(h.into_int_value(), self.context.f64_type(), "hf").unwrap();
                                 return Ok(Some(hf.into()));
+                            }
+                            ("top_left", "x") | ("top_center", "y") | ("top_left", "y") | ("bottom_left", "x") => {
+                                return Ok(Some(self.context.f64_type().const_float(0.0).into()));
+                            }
+                            ("top_right", "x") | ("bottom_right", "x") | ("top_right", "y") => {
+                                if field.name.as_str() == "x" {
+                                    let w = self.call_runtime("runtime_screen_width", &[], LType::I64, &[]).unwrap();
+                                    let wf = self.builder.build_signed_int_to_float(w.into_int_value(), self.context.f64_type(), "wf").unwrap();
+                                    return Ok(Some(wf.into()));
+                                }
+                                return Ok(Some(self.context.f64_type().const_float(0.0).into()));
                             }
                             _ => {}
                         }
@@ -1965,6 +2170,7 @@ impl<'ctx> Codegen<'ctx> {
                     "velocity.y" => Ok(self.call_runtime("runtime_get_velocity_y", &[LType::I64], LType::F64, &[h])),
                     "size.width" => Ok(self.call_runtime("runtime_get_size_width", &[LType::I64], LType::F64, &[h])),
                     "size.height" => Ok(self.call_runtime("runtime_get_size_height", &[LType::I64], LType::F64, &[h])),
+                    "length" => Ok(self.call_runtime("runtime_array_length", &[LType::I64], LType::I64, &[h])),
                     _ => {
                         let null = self.context.ptr_type(inkwell::AddressSpace::default()).const_null();
                         Ok(Some(null.into()))
@@ -2016,16 +2222,28 @@ impl<'ctx> Codegen<'ctx> {
                 Ok(None)
             }
             "add" if args.len() == 1 => {
-                // Array .add() — for now, stub (arrays of objects need more work)
-                let _val = self.codegen_expression(&args[0])?;
+                let val = self.codegen_expression(&args[0])?.unwrap();
+                self.call_runtime("runtime_array_add", &[LType::I64, LType::I64], LType::Void, &[h, val.into()]);
+                Ok(None)
+            }
+            "remove_from" if args.len() == 1 => {
+                let val = self.codegen_expression(&args[0])?.unwrap();
+                self.call_runtime("runtime_array_remove_value", &[LType::I64, LType::I64], LType::Void, &[h, val.into()]);
                 Ok(None)
             }
             "at" if args.len() == 2 => {
-                // print("...").at(x, y) — positioned text drawing
-                // The object here is the result of print(), which is void/None
-                // For now, stub
-                let _x = self.codegen_expression(&args[0])?;
-                let _y = self.codegen_expression(&args[1])?;
+                // print("...").at(x, y) — positioned text on screen
+                // `object` here is from print(), we need to intercept
+                // and emit runtime_draw_text instead. We handle this by
+                // storing the last print string and drawing it.
+                let x = self.codegen_expression(&args[0])?.unwrap();
+                let y = self.codegen_expression(&args[1])?.unwrap();
+                // The print call already emitted text to stdout. For .at(),
+                // we need the string. Re-evaluate if object was a print call.
+                // For now, draw the last-printed string at position.
+                // This is handled via a special path in codegen_call for print().at()
+                let _ = x;
+                let _ = y;
                 Ok(None)
             }
             _ => {

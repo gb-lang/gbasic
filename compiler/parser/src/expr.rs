@@ -49,6 +49,29 @@ impl Parser {
             });
         }
 
+        // `a to b` → inclusive range, desugars to `a..(b+1)`
+        if matches!(self.current(), Token::Ident(s) if s == "to") {
+            self.advance();
+            let end_expr = self.parse_or()?;
+            let end_span = end_expr.span();
+            let span = expr.span().merge(end_span);
+            // Synthesize end + 1
+            let end_plus_one = Expression::BinaryOp {
+                left: Box::new(end_expr),
+                op: BinaryOp::Add,
+                right: Box::new(Expression::Literal(Literal {
+                    kind: LiteralKind::Int(1),
+                    span: end_span,
+                })),
+                span: end_span,
+            };
+            return Ok(Expression::Range {
+                start: Box::new(expr),
+                end: Box::new(end_plus_one),
+                span,
+            });
+        }
+
         if matches!(self.current(), Token::Eq) {
             self.advance();
             let value = self.parse_assignment()?;
@@ -238,8 +261,28 @@ impl Parser {
                 Ok(Expression::Identifier(Identifier { name, span }))
             }
             Token::LParen => {
+                let start = self.current_span();
                 self.advance();
                 let expr = self.parse_expression()?;
+                // Tuple syntax: (x, y) → Point(x, y), (r, g, b) → Color(r, g, b)
+                if matches!(self.current(), Token::Comma) {
+                    let mut args = vec![expr];
+                    while matches!(self.current(), Token::Comma) {
+                        self.advance();
+                        args.push(self.parse_expression()?);
+                    }
+                    let end = self.expect(&Token::RParen)?;
+                    let span = start.merge(end);
+                    let name = if args.len() == 2 { "point" } else { "color" };
+                    return Ok(Expression::Call {
+                        callee: Box::new(Expression::Identifier(Identifier {
+                            name: name.to_string(),
+                            span: start,
+                        })),
+                        args,
+                        span,
+                    });
+                }
                 self.expect(&Token::RParen)?;
                 Ok(expr)
             }

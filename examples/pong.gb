@@ -1,56 +1,37 @@
 // Pong — a simple paddle + ball game
-Screen.Init(800, 600)
 
-let paddle_x = 350
-let paddle_y = 550
-let paddle_w = 100
-let paddle_h = 20
+let paddle = rect(100, 20)
+paddle.position = Screen.bottom_center
+paddle.position.y = paddle.position.y - 30
+paddle.color = white
+paddle.solid = true
 
-let ball_x = 400.0
-let ball_y = 300.0
-let ball_vx = 3.0
-let ball_vy = 3.0
-let ball_size = 10
+let ball = circle(10)
+ball.position = Screen.center
+ball.color = yellow
+ball.velocity = (3, 3)
+ball.bounces = true
 
 let score = 0
 
 while true {
-    System.FrameBegin()
+    if key("left")  { paddle.move(-8, 0) }
+    if key("right") { paddle.move(8, 0) }
 
-    if Input.KeyPressed("left") and paddle_x > 0 {
-        paddle_x = paddle_x - 8
-    }
-    if Input.KeyPressed("right") and paddle_x < 700 {
-        paddle_x = paddle_x + 8
-    }
-
-    ball_x = ball_x + ball_vx
-    ball_y = ball_y + ball_vy
-
-    if ball_x < 0.0 or ball_x > 790.0 {
-        ball_vx = 0.0 - ball_vx
-    }
-    if ball_y < 0.0 {
-        ball_vy = 0.0 - ball_vy
-    }
-
-    if ball_y > 600.0 {
-        ball_x = 400.0
-        ball_y = 300.0
+    // Ball fell off bottom — reset
+    if ball.position.y > Screen.height {
+        ball.position = Screen.center
+        ball.velocity = (3, 3)
         score = 0
+        play("lose")
     }
 
-    if ball_y > 540.0 and ball_y < 570.0 {
-        if ball_x > paddle_x and ball_x < paddle_x + paddle_w {
-            ball_vy = 0.0 - ball_vy
-            score = score + 1
-        }
+    // Paddle collision — bounces is automatic, just count score
+    if ball.collides(paddle) {
+        score = score + 1
+        play("bounce")
     }
 
-    Screen.Clear(0, 0, 0)
-    Screen.DrawRect(paddle_x, paddle_y, paddle_w, paddle_h, 255, 255, 255)
-    Screen.DrawCircle(ball_x, ball_y, ball_size, 255, 255, 0)
-    Screen.Present()
-
-    System.FrameEnd()
+    clear(black)
+    print("Score: {score}").at(10, 10)
 }

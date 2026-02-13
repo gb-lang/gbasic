@@ -1,0 +1,65 @@
+// Flappy Bird — tap space to flap, avoid pipes
+
+let bird = circle(15)
+bird.position = Point(100, Screen.center.y)
+bird.color = yellow
+bird.gravity = 0.5
+
+let ground = rect(Screen.width, 20)
+ground.position = Point(0, Screen.height - 20)
+ground.color = green
+ground.solid = true
+
+let pipes = []
+let score = 0
+let timer = 0
+
+while true {
+    if key("space") {
+        bird.velocity.y = -8
+        play("flap")
+    }
+
+    // Spawn pipes
+    timer = timer + 1
+    if timer % 90 == 0 {
+        let gap_y = random(100, 400)
+
+        let top = rect(60, gap_y)
+        top.position = Point(Screen.width, 0)
+        top.color = green
+        top.velocity.x = -3
+        top.solid = true
+        pipes.add(top)
+
+        let bot = rect(60, Screen.height - gap_y - 150)
+        bot.position = Point(Screen.width, gap_y + 150)
+        bot.color = green
+        bot.velocity.x = -3
+        bot.solid = true
+        pipes.add(bot)
+    }
+
+    // Collision with pipes or ground
+    for pipe in pipes {
+        if bird.collides(pipe) {
+            play("hit")
+            bird.position = Point(100, Screen.center.y)
+            bird.velocity.y = 0
+            score = 0
+        }
+        if pipe.position.x < -60 {
+            pipe.remove()
+            score = score + 1
+        }
+    }
+
+    if bird.collides(ground) or bird.position.y < 0 {
+        play("lose")
+        bird.position = Point(100, Screen.center.y)
+        bird.velocity.y = 0
+    }
+
+    clear(cyan)
+    print("Score: {score}").at(10, 10)
+}

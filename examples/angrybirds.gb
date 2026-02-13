@@ -1,0 +1,66 @@
+// Angry Birds — launch a bird to knock down blocks and hit the pig
+
+let ground = rect(Screen.width, 40)
+ground.position = Point(0, Screen.height - 40)
+ground.color = green
+ground.solid = true
+
+let sling = Point(120, Screen.height - 80)
+
+let bird = circle(15)
+bird.position = sling
+bird.color = red
+
+// Build a tower
+let blocks = []
+for i in 0 to 4 {
+    let block = rect(30, 30)
+    block.position = Point(550, Screen.height - 70 - i * 30)
+    block.color = brown
+    block.gravity = 0.3
+    block.solid = true
+    blocks.add(block)
+}
+
+let pig = circle(18)
+pig.position = Point(565, Screen.height - 220)
+pig.color = green
+pig.gravity = 0.3
+
+let launched = false
+let score = 0
+
+while true {
+    // Launch bird with space
+    if not launched and key("space") {
+        bird.velocity = (8, -10)
+        bird.gravity = 0.4
+        launched = true
+        play("launch")
+    }
+
+    // Bird hits blocks
+    for block in blocks {
+        if bird.collides(block) {
+            play("crash")
+        }
+    }
+
+    // Bird hits pig
+    if bird.collides(pig) {
+        pig.remove()
+        score = score + 1
+        play("squeal")
+    }
+
+    // Bird off screen — reset
+    if launched and (bird.position.x > Screen.width or bird.position.y > Screen.height) {
+        bird.position = sling
+        bird.velocity = (0, 0)
+        bird.gravity = 0
+        launched = false
+    }
+
+    clear(cyan)
+    print("Score: {score}").at(10, 10)
+}

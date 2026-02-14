@@ -2,19 +2,48 @@
 
 A compiled programming language designed for kids aged 7-12 to learn programming through game creation. G-Basic compiles to native binaries via LLVM, with built-in support for 2D graphics, sound, and input handling.
 
+## Project Status
+
+G-Basic is approximately 85% complete for the desktop target:
+
+- Compiler: lexer, parser, typechecker, LLVM codegen all functional
+- Runtime: SDL2-based desktop runtime with graphics, input, physics, and sound
+- Object model: handle-based game objects (rect, circle) with properties and physics
+- 95+ tests passing (unit, snapshot, e2e, error golden)
+- 12 example programs including Pong and particle effects
+
 ## Quick Start
 
 ### Prerequisites
 
-- Rust (edition 2024)
-- LLVM 18 (`brew install llvm@18` on macOS)
-- Set `LLVM_SYS_180_PREFIX` to your LLVM 18 install path
+- Rust (edition 2024, stable toolchain)
+- LLVM 18
+- A C linker (`cc`)
+
+**macOS:**
+```bash
+brew install llvm@18
+export LLVM_SYS_180_PREFIX="$(brew --prefix llvm@18)"
+```
+
+**Linux:**
+```bash
+# Ubuntu/Debian
+sudo apt install llvm-18-dev libpolly-18-dev
+export LLVM_SYS_180_PREFIX=/usr/lib/llvm-18
+```
 
 ### Build
 
 ```bash
+# Build the compiler (requires LLVM)
 cargo build -p gbasic --features llvm
+
+# Build the desktop runtime (SDL2 builds from source via bundled feature)
 cargo build -p gbasic-runtime-desktop
+
+# Optional: enable SDL2_mixer for real audio (requires libsdl2-mixer-dev)
+cargo build -p gbasic-runtime-desktop --features mixer
 ```
 
 ### Hello World
@@ -24,7 +53,6 @@ print("Hello, World!")
 ```
 
 ```bash
-echo 'print("Hello, World!")' > hello.gb
 ./target/debug/gbasic hello.gb -o hello --run
 ```
 
@@ -54,6 +82,8 @@ print(add(3, 4))  // 7
 ```gbasic
 if score > 100 {
     print("You win!")
+} else if score > 50 {
+    print("Getting close!")
 } else {
     print("Keep trying!")
 }
@@ -62,16 +92,19 @@ for i in 0..10 {
     print(i)
 }
 
+// Inclusive range
+for i in 1 to 5 {
+    print(i)  // 1, 2, 3, 4, 5
+}
+
 while running {
-    System.FrameBegin()
     // game logic
-    System.FrameEnd()
 }
 
 match direction {
-    1 { print("North") }
-    2 { print("South") }
-    _ { print("Unknown") }
+    1 -> { print("North") }
+    2 -> { print("South") }
+    _ -> { print("Unknown") }
 }
 ```
 
@@ -91,7 +124,13 @@ print("Score: {score}")
 let numbers = [1, 2, 3, 4, 5]
 print(numbers[0])
 
-for n in [10, 20, 30] {
+// Dynamic arrays
+let items = []
+items.add(10)
+items.add(20)
+print(items.length)  // 2
+
+for n in items {
     print(n)
 }
 ```
@@ -108,6 +147,36 @@ if not done or force_quit {
 }
 ```
 
+### Object Model (Guardrails API)
+
+```gbasic
+// Create game objects
+let ball = circle(10)
+ball.position = Screen.center
+ball.velocity = (3, -2)
+ball.color = red
+ball.bounces = true
+
+let paddle = rect(100, 20)
+paddle.position = Screen.bottom_center
+paddle.color = white
+paddle.solid = true
+
+// Implicit game loop with physics
+while true {
+    if key("left") {
+        paddle.move(-5, 0)
+    }
+    if key("right") {
+        paddle.move(5, 0)
+    }
+    if ball.collides(paddle) {
+        play("bounce")
+    }
+    print("Score: {score}").at(10, 10)
+}
+```
+
 ## Namespaces
 
 G-Basic provides built-in namespaces for common game operations:
@@ -121,61 +190,38 @@ G-Basic provides built-in namespaces for common game operations:
 | **System** | Timing, frame control |
 | **Memory** | Key-value store |
 | **IO** | File read/write |
+| **Asset** | Asset loading and caching |
 
-### Screen
+### Layer 1 Shortcuts
 
-```gbasic
-Screen.Init(800, 600)
-Screen.Clear(0, 0, 0)
-Screen.DrawRect(10, 20, 100, 50, 255, 0, 0)
-Screen.DrawCircle(400, 300, 50, 0, 255, 0)
-Screen.DrawLine(0, 0, 800, 600, 255, 255, 255)
-Screen.Present()
+Common operations have beginner-friendly shortcuts:
 
-let sprite = Screen.SpriteLoad("hero.bmp")
-Screen.SpriteAt(sprite, 100.0, 200.0)
-Screen.SpriteScale(sprite, 2.0)
-Screen.SpriteDraw(sprite)
-```
+| Shortcut | Full Form |
+|----------|-----------|
+| `print(text)` | `IO.Print(text)` |
+| `rect(w, h)` | Create rectangle object |
+| `circle(r)` | Create circle object |
+| `key(name)` | `Input.KeyPressed(name)` |
+| `random(min, max)` | `Math.Random(min, max)` |
+| `play(sound)` | `Sound.EffectPlay(sound)` |
+| `clear(r, g, b)` | `Screen.Clear(r, g, b)` |
 
-### Sound
+## CLI Usage
 
-```gbasic
-Sound.EffectLoad("explosion.wav")
-Sound.EffectPlay("explosion.wav")
-Sound.EffectVolume("explosion.wav", 0.5)
-```
+```bash
+# Compile to binary
+./target/debug/gbasic program.gb -o program
 
-### Input
+# Compile and run
+./target/debug/gbasic program.gb -o program --run
 
-```gbasic
-Input.Poll()
-if Input.KeyPressed("space") {
-    // jump!
-}
-let mx = Input.MouseX()
-let my = Input.MouseY()
-```
+# Type-check only
+./target/debug/gbasic program.gb --check
 
-### Math
-
-```gbasic
-let angle = Math.Pi() / 4.0
-let x = Math.Cos(angle) * 100.0
-let y = Math.Sin(angle) * 100.0
-let r = Math.Random()  // 0.0 to 1.0
-```
-
-### System
-
-```gbasic
-// Game loop with 60 FPS targeting
-while true {
-    System.FrameBegin()
-    let dt = System.FrameTime()
-    // update and render...
-    System.FrameEnd()
-}
+# Debug output
+./target/debug/gbasic program.gb --dump-tokens
+./target/debug/gbasic program.gb --dump-ast
+./target/debug/gbasic program.gb --dump-ir
 ```
 
 ## Architecture
@@ -184,31 +230,31 @@ while true {
 Source (.gb)
     |
     v
-  Lexer  (logos) ──> Tokens
+  Lexer  (logos) --> Tokens
     |
     v
-  Parser ──> AST
+  Parser --> AST
     |
     v
-  Typechecker ──> Validated AST
+  Typechecker --> Validated AST
     |
     v
-  LLVM Codegen (inkwell) ──> .o file
+  LLVM Codegen (inkwell) --> .o file
     |
     v
-  Linker (cc) + Runtime (.a) ──> Native Binary
+  Linker (cc) + Runtime (.a) --> Native Binary
 ```
 
 ## Project Structure
 
 ```
 compiler/
-  common/     # Shared types: AST, Span, Type, Error
-  lexer/      # Logos-based tokenizer
+  common/     # Shared types: AST, Span, Type, Error, Shortcuts
+  lexer/      # Logos-based tokenizer (case-insensitive)
   parser/     # Recursive descent parser
   typechecker/# Type checking pass
   irgen/      # LLVM IR generation (inkwell)
-  cli/        # gbasic binary (clap)
+  cli/        # gbasic binary (clap) + e2e tests
 
 runtime/
   desktop/    # SDL2 runtime (staticlib linked into binaries)
@@ -216,25 +262,19 @@ runtime/
 
 examples/     # Example G-Basic programs
 docs/         # Language grammar and documentation
-tests/        # End-to-end integration tests
 ```
 
 ## Testing
 
 ```bash
-# Run all unit tests
+# Run all unit tests (lexer, parser, typechecker, codegen)
 cargo test --workspace
 
-# Run end-to-end tests (requires LLVM)
-cargo test --test e2e
+# Run end-to-end tests (requires LLVM + runtime)
+cargo test -p gbasic --test e2e
 
-# Type-check only
-./target/debug/gbasic program.gb --check
-
-# Dump tokens/AST/IR for debugging
-./target/debug/gbasic program.gb --dump-tokens
-./target/debug/gbasic program.gb --dump-ast
-./target/debug/gbasic program.gb --dump-ir
+# Run error message golden tests
+cargo test -p gbasic --test error_golden
 ```
 
 ## Examples
@@ -246,9 +286,11 @@ cargo test --test e2e
 | `arithmetic.gb` | Math operations |
 | `control_flow.gb` | If/else, loops, match |
 | `namespaces.gb` | Using built-in namespaces |
-| `pong.gb` | Pong game |
+| `pong.gb` | Pong game (keyboard + physics) |
 | `particles.gb` | Particle effects |
 | `math_viz.gb` | Animated sine wave |
+| `bouncing_balls.gb` | Physics with bouncing objects |
+| `color_mixer.gb` | Color manipulation |
 | `sprite_demo.gb` | Sprite loading and movement |
 | `sound_demo.gb` | Sound effects |
 

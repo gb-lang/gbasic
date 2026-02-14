@@ -147,6 +147,7 @@ pub enum Token {
     System,
     Memory,
     IO,
+    Asset,
 
     // Type keywords
     TyInt,
@@ -226,6 +227,7 @@ impl std::fmt::Display for Token {
             Token::System => write!(f, "System"),
             Token::Memory => write!(f, "Memory"),
             Token::IO => write!(f, "IO"),
+            Token::Asset => write!(f, "Asset"),
             Token::TyInt => write!(f, "Int"),
             Token::TyFloat => write!(f, "Float"),
             Token::TyString => write!(f, "String"),
@@ -303,6 +305,7 @@ fn classify_ident(s: &str) -> Token {
         "system" => Token::System,
         "memory" => Token::Memory,
         "io" => Token::IO,
+        "asset" => Token::Asset,
         "int" => Token::TyInt,
         "float" => Token::TyFloat,
         "string" => Token::TyString,

@@ -16,6 +16,7 @@ impl Parser {
             Token::System => NamespaceRef::System,
             Token::Memory => NamespaceRef::Memory,
             Token::IO => NamespaceRef::IO,
+            Token::Asset => NamespaceRef::Asset,
             _ => {
                 return Err(GBasicError::SyntaxError {
                     message: format!("expected namespace, found '{}'", self.current()),

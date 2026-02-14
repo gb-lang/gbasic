@@ -46,7 +46,7 @@ keyword ::= "let" | "fun" | "fn" | "if" | "else" | "for" | "in" | "while"
 
 ```ebnf
 namespace ::= "screen" | "sound" | "input" | "math"
-            | "system" | "memory" | "io"
+            | "system" | "memory" | "io" | "asset"
 ```
 
 ### Literals
@@ -127,7 +127,7 @@ parameter ::= identifier ":" type
 ### If Statement
 
 ```ebnf
-if_statement ::= "if" expression block [ "else" block ]
+if_statement ::= "if" expression block [ "else" ( if_statement | block ) ]
 ```
 
 ### For Statement
@@ -239,6 +239,52 @@ method_call ::= "." identifier "(" argument_list ")"
 ```
 
 Note: A method chain must have at least one method call (e.g., `Screen.Layer(0)`).
+Method chain steps can omit parentheses for property-style access (e.g., `Screen.width`).
+
+### Tuple Syntax
+
+Parenthesized comma-separated expressions desugar to constructor calls:
+
+```ebnf
+tuple_2 ::= "(" expression "," expression ")"          (* desugars to Point(x, y) *)
+tuple_3 ::= "(" expression "," expression "," expression ")"  (* desugars to Color(r, g, b) *)
+```
+
+### Inclusive Range (`to`)
+
+```ebnf
+inclusive_range ::= expression "to" expression
+```
+
+`for i in 0 to 5` desugars to `for i in 0..6` (inclusive of both endpoints).
+
+### Layer 1 Shortcuts
+
+Common operations have short-form aliases handled at the codegen level:
+
+| Shortcut | Equivalent |
+|----------|------------|
+| `print(args)` | `Screen.Layer(0).Print(args)` |
+| `clear(r, g, b)` | `Screen.Layer(0).Clear(r, g, b)` |
+| `rect(w, h)` | Create rectangle game object |
+| `circle(r)` | Create circle game object |
+| `random(min, max)` | `Math.Random(min, max)` |
+| `key(name)` | `Input.Keyboard.Key(name)` |
+| `play(name)` | `Sound.Effect(name).Play()` |
+
+### Object Model
+
+Game objects are created with `rect(w, h)` or `circle(r)` and return integer handles:
+
+```ebnf
+object_property_set ::= identifier "." property_path "=" expression
+object_property_get ::= identifier "." property_path
+object_method_call ::= identifier "." method_name "(" argument_list ")"
+property_path ::= identifier { "." identifier }
+```
+
+Properties: `position`, `position.x`, `position.y`, `velocity`, `color`, `solid`, `bounces`, `visible`, `layer`, `gravity`.
+Methods: `.move(dx, dy)`, `.collides(other)`, `.contains(x, y)`, `.remove()`.
 
 ## Patterns
 
@@ -485,3 +531,9 @@ print("Hello, {name}!")  // prints: Hello, World!
 |--------|-----------|-------------|
 | ReadFile | (path: String) -> String | Read file contents |
 | WriteFile | (path: String, data: String) | Write to file |
+
+### Asset
+
+| Method | Signature | Description |
+|--------|-----------|-------------|
+| Load | (path: String) -> Int | Load an asset file, returns handle |

@@ -220,6 +220,7 @@ pub enum NamespaceRef {
     System,
     Memory,
     IO,
+    Asset,
 }
 
 impl std::fmt::Display for NamespaceRef {
@@ -232,6 +233,7 @@ impl std::fmt::Display for NamespaceRef {
             NamespaceRef::System => write!(f, "System"),
             NamespaceRef::Memory => write!(f, "Memory"),
             NamespaceRef::IO => write!(f, "IO"),
+            NamespaceRef::Asset => write!(f, "Asset"),
         }
     }
 }

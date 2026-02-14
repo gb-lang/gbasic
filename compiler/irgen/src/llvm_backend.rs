@@ -117,6 +117,8 @@ fn get_namespace_method(namespace: NamespaceRef, method: &str) -> Option<MethodE
         (IO, "printinteger") => (vec![I64], Void),
         (IO, "readfile") => (vec![Ptr], Ptr),
         (IO, "writefile") => (vec![Ptr, Ptr], Void),
+        // Asset
+        (Asset, "load") => (vec![Ptr], I64),
         _ => return None,
     };
     // Special-case runtime names that don't follow the convention
@@ -127,6 +129,7 @@ fn get_namespace_method(namespace: NamespaceRef, method: &str) -> Option<MethodE
             let ns = match namespace {
                 Screen => "screen", Sound => "sound", Input => "input",
                 Math => "math", System => "system", Memory => "memory", IO => "io",
+                Asset => "asset",
             };
             format!("runtime_{ns}_{}", method_to_snake(method))
         }
@@ -805,7 +808,7 @@ impl<'ctx> Codegen<'ctx> {
 
         // Dynamic array iteration: codegen iterable as a handle, iterate with index counter
         let arr_handle = self.codegen_expression(iterable)?.unwrap();
-        let len = self.call_runtime("runtime_array_length", &[LType::I64], LType::I64, &[arr_handle.into()]).unwrap().into_int_value();
+        let _len = self.call_runtime("runtime_array_length", &[LType::I64], LType::I64, &[arr_handle.into()]).unwrap().into_int_value();
 
         let idx_alloca = self.builder.build_alloca(i64_type, "idx").unwrap();
         self.builder.build_store(idx_alloca, i64_type.const_int(0, false)).unwrap();

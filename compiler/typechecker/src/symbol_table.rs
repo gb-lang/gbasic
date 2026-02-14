@@ -4,6 +4,7 @@ use indexmap::IndexMap;
 #[derive(Debug, Clone)]
 pub struct Symbol {
     pub ty: Type,
+    #[allow(dead_code)]
     pub mutable: bool,
 }
 

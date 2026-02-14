@@ -251,7 +251,7 @@ impl Parser {
                 }))
             }
             Token::Screen | Token::Sound | Token::Input | Token::Math | Token::System
-            | Token::Memory | Token::IO => {
+            | Token::Memory | Token::IO | Token::Asset => {
                 self.parse_method_chain()
             }
             Token::Ident(ref name) => {

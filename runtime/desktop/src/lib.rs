@@ -1,6 +1,8 @@
 //! G-Basic desktop runtime — extern "C" stubs for the LLVM-compiled programs.
 
 use sdl2::event::Event;
+#[cfg(feature = "mixer")]
+use sdl2::mixer;
 use sdl2::pixels::Color;
 use sdl2::rect::{Point, Rect};
 use std::cell::{Cell, RefCell};
@@ -71,6 +73,10 @@ thread_local! {
     static OBJECTS: RefCell<Vec<GameObject>> = RefCell::new(Vec::new());
     static SCREEN_AUTO_INIT: Cell<bool> = const { Cell::new(false) };
     static DYN_ARRAYS: RefCell<Vec<Vec<i64>>> = RefCell::new(Vec::new());
+    #[cfg(feature = "mixer")]
+    static MIXER_INIT: Cell<bool> = const { Cell::new(false) };
+    #[cfg(feature = "mixer")]
+    static SOUND_CHUNKS: RefCell<HashMap<String, mixer::Chunk>> = RefCell::new(HashMap::new());
 }
 
 struct SpriteInfo {
@@ -465,28 +471,145 @@ pub extern "C" fn runtime_screen_draw_circle(cx: i64, cy: i64, radius: i64, r: i
 
 // ─── Sound namespace ───
 
+#[cfg(feature = "mixer")]
+mod sound_mixer {
+    use super::*;
+
+    pub fn ensure_mixer_init() {
+        MIXER_INIT.with(|init| {
+            if !init.get() {
+                init.set(true);
+                let _ = mixer::open_audio(44100, mixer::AUDIO_S16LSB, 2, 1024);
+                mixer::allocate_channels(16);
+            }
+        });
+    }
+
+    pub fn beep(freq: i64, dur: i64) {
+        ensure_mixer_init();
+        let sample_rate = 44100u32;
+        let num_samples = (sample_rate as f64 * dur as f64 / 1000.0) as usize;
+        let mut buf: Vec<u8> = Vec::with_capacity(num_samples * 2);
+        for i in 0..num_samples {
+            let t = i as f64 / sample_rate as f64;
+            let sample = (32000.0 * (2.0 * std::f64::consts::PI * freq as f64 * t).sin()) as i16;
+            buf.extend_from_slice(&sample.to_le_bytes());
+        }
+        let data_size = buf.len() as u32;
+        let mut wav = Vec::with_capacity(44 + buf.len());
+        wav.extend_from_slice(b"RIFF");
+        wav.extend_from_slice(&(36 + data_size).to_le_bytes());
+        wav.extend_from_slice(b"WAVEfmt ");
+        wav.extend_from_slice(&16u32.to_le_bytes());
+        wav.extend_from_slice(&1u16.to_le_bytes());
+        wav.extend_from_slice(&1u16.to_le_bytes());
+        wav.extend_from_slice(&sample_rate.to_le_bytes());
+        wav.extend_from_slice(&(sample_rate * 2).to_le_bytes());
+        wav.extend_from_slice(&2u16.to_le_bytes());
+        wav.extend_from_slice(&16u16.to_le_bytes());
+        wav.extend_from_slice(b"data");
+        wav.extend_from_slice(&data_size.to_le_bytes());
+        wav.extend_from_slice(&buf);
+        if let Ok(chunk) = mixer::Chunk::from_raw_buffer(wav.into_boxed_slice()) {
+            let _ = mixer::Channel::all().play(&chunk, 0);
+            std::thread::sleep(std::time::Duration::from_millis(dur as u64));
+        }
+    }
+
+    pub fn effect_load(path: *const std::ffi::c_char) -> i64 {
+        ensure_mixer_init();
+        let p = match unsafe { read_cstr(path) } {
+            Some(s) => s,
+            None => return 0,
+        };
+        SOUND_CHUNKS.with(|chunks| {
+            let mut chunks = chunks.borrow_mut();
+            if chunks.contains_key(p) {
+                return 1;
+            }
+            match mixer::Chunk::from_file(p) {
+                Ok(chunk) => { chunks.insert(p.to_string(), chunk); 1 }
+                Err(e) => { eprintln!("[sound] failed to load \"{p}\": {e}"); 0 }
+            }
+        })
+    }
+
+    pub fn effect_play(path: *const std::ffi::c_char) {
+        ensure_mixer_init();
+        let p = match unsafe { read_cstr(path) } {
+            Some(s) => s,
+            None => return,
+        };
+        SOUND_CHUNKS.with(|chunks| {
+            let chunks = chunks.borrow();
+            if let Some(chunk) = chunks.get(p) {
+                let _ = mixer::Channel::all().play(chunk, 0);
+            } else {
+                drop(chunks);
+                effect_load(path);
+                SOUND_CHUNKS.with(|c| {
+                    let c = c.borrow();
+                    if let Some(chunk) = c.get(p) {
+                        let _ = mixer::Channel::all().play(chunk, 0);
+                    }
+                });
+            }
+        });
+    }
+
+    pub fn effect_volume(path: *const std::ffi::c_char, volume: f64) {
+        let p = match unsafe { read_cstr(path) } {
+            Some(s) => s,
+            None => return,
+        };
+        SOUND_CHUNKS.with(|chunks| {
+            let mut chunks = chunks.borrow_mut();
+            if let Some(chunk) = chunks.get_mut(p) {
+                chunk.set_volume((volume.clamp(0.0, 1.0) * 128.0) as i32);
+            }
+        });
+    }
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn runtime_sound_beep(freq: i64, dur: i64) {
-    eprintln!("[sound] beep freq={freq} dur={dur}ms (stub — real tone generation not implemented)");
+    #[cfg(feature = "mixer")]
+    { sound_mixer::beep(freq, dur); }
+    #[cfg(not(feature = "mixer"))]
+    { eprintln!("[sound] beep freq={freq} dur={dur}ms (enable 'mixer' feature for real audio)"); }
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn runtime_sound_effect_load(path: *const std::ffi::c_char) -> i64 {
-    let p = unsafe { read_cstr(path) }.unwrap_or("?");
-    eprintln!("[sound] effect_load(\"{p}\") (stub — install SDL2_mixer for real audio)");
-    1
+    #[cfg(feature = "mixer")]
+    { return sound_mixer::effect_load(path); }
+    #[cfg(not(feature = "mixer"))]
+    { let p = unsafe { read_cstr(path) }.unwrap_or("?"); eprintln!("[sound] effect_load(\"{p}\") (enable 'mixer' feature for real audio)"); 1 }
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn runtime_sound_effect_play(path: *const std::ffi::c_char) {
-    let p = unsafe { read_cstr(path) }.unwrap_or("?");
-    eprintln!("[sound] effect_play(\"{p}\") (stub)");
+    #[cfg(feature = "mixer")]
+    { sound_mixer::effect_play(path); }
+    #[cfg(not(feature = "mixer"))]
+    { let p = unsafe { read_cstr(path) }.unwrap_or("?"); eprintln!("[sound] effect_play(\"{p}\") (stub)"); }
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn runtime_sound_effect_volume(path: *const std::ffi::c_char, volume: f64) {
+    #[cfg(feature = "mixer")]
+    { sound_mixer::effect_volume(path, volume); }
+    #[cfg(not(feature = "mixer"))]
+    { let p = unsafe { read_cstr(path) }.unwrap_or("?"); eprintln!("[sound] effect_volume(\"{p}\", {volume}) (stub)"); }
+}
+
+// ─── Asset namespace ───
+
+#[unsafe(no_mangle)]
+pub extern "C" fn runtime_asset_load(path: *const std::ffi::c_char) -> i64 {
     let p = unsafe { read_cstr(path) }.unwrap_or("?");
-    eprintln!("[sound] effect_volume(\"{p}\", {volume}) (stub)");
+    eprintln!("[asset] load(\"{p}\") (stub — asset caching not yet implemented)");
+    0
 }
 
 // ─── Memory namespace ───

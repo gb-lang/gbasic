@@ -43,6 +43,10 @@ struct Cli {
     /// Run the compiled binary after successful compilation
     #[arg(long)]
     run: bool,
+
+    /// Compilation target: desktop (default) or web
+    #[arg(long, default_value = "desktop")]
+    target: String,
 }
 
 fn print_error(filename: &str, source: &str, err: &GBasicError) {
@@ -141,8 +145,22 @@ fn main() {
         return;
     }
 
+    // Parse target
+    let target = match cli.target.as_str() {
+        "desktop" => gbasic_irgen::CompileTarget::Desktop,
+        "web" => gbasic_irgen::CompileTarget::Web,
+        other => {
+            eprintln!(
+                "{}: unknown target '{}'. Use 'desktop' or 'web'",
+                "error".red().bold(),
+                other
+            );
+            process::exit(1);
+        }
+    };
+
     // Code generation
-    if let Err(err) = gbasic_irgen::codegen(&program, &cli.output, cli.dump_ir) {
+    if let Err(err) = gbasic_irgen::codegen(&program, &cli.output, cli.dump_ir, target) {
         print_error(&file, &source, &err);
         process::exit(1);
     }

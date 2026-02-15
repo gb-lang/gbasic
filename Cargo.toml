@@ -34,5 +34,3 @@ insta = { version = "1", features = ["yaml"] }
 
 # Runtime
 sdl2 = { version = "0.37", features = ["bundled"] }
-wasm-bindgen = "0.2"
-web-sys = "0.3"

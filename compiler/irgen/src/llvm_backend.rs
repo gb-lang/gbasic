@@ -1,3 +1,4 @@
+use crate::CompileTarget;
 use gbasic_common::ast::*;
 use gbasic_common::error::GBasicError;
 use gbasic_common::span::Span;
@@ -183,6 +184,26 @@ fn resolve_field_chain(expr: &Expression) -> Option<(String, String)> {
     }
 }
 
+/// Find a tool binary, checking common brew paths and then PATH.
+fn find_tool(name: &str) -> String {
+    // Check LLVM prefix first (for wasm-ld)
+    if let Ok(prefix) = std::env::var("LLVM_SYS_180_PREFIX") {
+        let p = format!("{prefix}/bin/{name}");
+        if Path::new(&p).exists() {
+            return p;
+        }
+    }
+    // Common brew locations
+    for prefix in &["/opt/homebrew/opt/llvm@18/bin", "/usr/local/opt/llvm@18/bin",
+                    "/opt/homebrew/bin", "/usr/local/bin"] {
+        let p = format!("{prefix}/{name}");
+        if Path::new(&p).exists() {
+            return p;
+        }
+    }
+    name.to_string()
+}
+
 pub struct Codegen<'ctx> {
     context: &'ctx Context,
     module: Module<'ctx>,
@@ -320,8 +341,25 @@ impl<'ctx> Codegen<'ctx> {
         program: &Program,
         output_path: &str,
         dump_ir: bool,
+        target: CompileTarget,
     ) -> Result<(), GBasicError> {
         let mut cg = Codegen::new(context);
+
+        // For web target, set wasm32 triple and data layout
+        if target == CompileTarget::Web {
+            Target::initialize_webassembly(&InitializationConfig::default());
+            let triple = inkwell::targets::TargetTriple::create("wasm32-unknown-unknown");
+            cg.module.set_triple(&triple);
+            let wasm_target = Target::from_triple(&triple).unwrap();
+            let wasm_machine = wasm_target
+                .create_target_machine(
+                    &triple, "generic", "", OptimizationLevel::Default,
+                    RelocMode::PIC, CodeModel::Default,
+                )
+                .unwrap();
+            cg.module.set_data_layout(&wasm_machine.get_target_data().get_data_layout());
+        }
+
         cg.declare_runtime_functions();
 
         // First pass: declare all top-level functions
@@ -331,10 +369,22 @@ impl<'ctx> Codegen<'ctx> {
             }
         }
 
-        // Build main function wrapping top-level statements
-        let i32_type = cg.context.i32_type();
-        let main_fn_type = i32_type.fn_type(&[], false);
-        let main_fn = cg.module.add_function("main", main_fn_type, None);
+        // For web target, use _start (void) as entry; for desktop, use main() -> i32
+        let (main_fn, is_web) = if target == CompileTarget::Web {
+            // Add wasm_alloc bump allocator
+            cg.emit_wasm_alloc();
+
+            let void_type = cg.context.void_type();
+            let start_fn_type = void_type.fn_type(&[], false);
+            let start_fn = cg.module.add_function("_start", start_fn_type, None);
+            (start_fn, true)
+        } else {
+            let i32_type = cg.context.i32_type();
+            let main_fn_type = i32_type.fn_type(&[], false);
+            let main_fn = cg.module.add_function("main", main_fn_type, None);
+            (main_fn, false)
+        };
+
         let entry = cg.context.append_basic_block(main_fn, "entry");
         cg.builder.position_at_end(entry);
         cg.current_function = Some(main_fn);
@@ -351,11 +401,16 @@ impl<'ctx> Codegen<'ctx> {
             }
         }
 
-        // Return 0 from main (only if no terminator yet)
+        // Return from entry point (only if no terminator yet)
         if cg.needs_terminator() {
-            cg.builder
-                .build_return(Some(&i32_type.const_int(0, false)))
-                .unwrap();
+            if is_web {
+                cg.builder.build_return(None).unwrap();
+            } else {
+                let i32_type = cg.context.i32_type();
+                cg.builder
+                    .build_return(Some(&i32_type.const_int(0, false)))
+                    .unwrap();
+            }
         }
 
         // Verify
@@ -371,7 +426,10 @@ impl<'ctx> Codegen<'ctx> {
         }
 
         // Emit and link
-        cg.emit_and_link(output_path)?;
+        match target {
+            CompileTarget::Desktop => cg.emit_and_link(output_path)?,
+            CompileTarget::Web => cg.emit_wasm(output_path)?,
+        }
         Ok(())
     }
 
@@ -2255,6 +2313,134 @@ impl<'ctx> Codegen<'ctx> {
                 })
             }
         }
+    }
+
+    /// Emit a bump-allocator function exported from WASM for string returns.
+    fn emit_wasm_alloc(&self) {
+        let i32_type = self.context.i32_type();
+        let fn_type = i32_type.fn_type(&[i32_type.into()], false);
+        let func = self.module.add_function("wasm_alloc", fn_type, None);
+
+        let entry = self.context.append_basic_block(func, "entry");
+        let builder = self.context.create_builder();
+        builder.position_at_end(entry);
+
+        // Global bump pointer starting at 1MB offset (above stack)
+        let heap_ptr_type = i32_type;
+        let heap_global = self.module.add_global(heap_ptr_type, None, "__heap_ptr");
+        heap_global.set_initializer(&i32_type.const_int(1048576, false)); // 1MB
+
+        let current = builder
+            .build_load(i32_type, heap_global.as_pointer_value(), "cur")
+            .unwrap()
+            .into_int_value();
+        let size = func.get_first_param().unwrap().into_int_value();
+        let next = builder.build_int_add(current, size, "next").unwrap();
+        builder
+            .build_store(heap_global.as_pointer_value(), next)
+            .unwrap();
+        builder.build_return(Some(&current)).unwrap();
+    }
+
+    /// Emit WASM binary via LLVM + wasm-ld, then generate JS/HTML glue.
+    fn emit_wasm(&self, output_path: &str) -> Result<(), GBasicError> {
+        Target::initialize_webassembly(&InitializationConfig::default());
+
+        let triple = inkwell::targets::TargetTriple::create("wasm32-unknown-unknown");
+        let target = Target::from_triple(&triple).map_err(|e| GBasicError::CodegenError {
+            span: None,
+            message: format!("failed to get wasm target: {e}"),
+        })?;
+        let machine = target
+            .create_target_machine(
+                &triple,
+                "generic",
+                "",
+                OptimizationLevel::Default,
+                RelocMode::PIC,
+                CodeModel::Default,
+            )
+            .ok_or_else(|| GBasicError::CodegenError {
+                span: None,
+                message: "failed to create wasm target machine".into(),
+            })?;
+
+        // Create output directory
+        let out_dir = Path::new(output_path);
+        std::fs::create_dir_all(out_dir).map_err(|e| GBasicError::CodegenError {
+            span: None,
+            message: format!("failed to create output directory: {e}"),
+        })?;
+
+        let obj_path = out_dir.join("output.o");
+        machine
+            .write_to_file(&self.module, FileType::Object, &obj_path)
+            .map_err(|e| GBasicError::CodegenError {
+                span: None,
+                message: format!("failed to write wasm object file: {e}"),
+            })?;
+
+        let wasm_path = out_dir.join("game.wasm");
+
+        let wasm_ld = find_tool("wasm-ld");
+
+        let status = Command::new(&wasm_ld)
+            .arg("--no-entry")
+            .arg("--export-all")
+            .arg("--allow-undefined")
+            .arg("--import-memory")
+            .arg("-o")
+            .arg(wasm_path.to_str().unwrap())
+            .arg(obj_path.to_str().unwrap())
+            .status()
+            .map_err(|e| GBasicError::CodegenError {
+                span: None,
+                message: format!("failed to run wasm-ld ({}): {e}", wasm_ld),
+            })?;
+
+        if !status.success() {
+            return Err(GBasicError::CodegenError {
+                span: None,
+                message: format!("wasm-ld failed with status: {status}"),
+            });
+        }
+
+        // Clean up object file
+        let _ = std::fs::remove_file(&obj_path);
+
+        // Run wasm-opt --asyncify to enable async frame yielding
+        let wasm_opt = find_tool("wasm-opt");
+        let asyncified_path = out_dir.join("game_async.wasm");
+        let asyncify_status = Command::new(&wasm_opt)
+            .arg("--asyncify")
+            .arg("--pass-arg=asyncify-imports@env.runtime_frame_auto_end")
+            .arg("-O2")
+            .arg(&wasm_path)
+            .arg("-o")
+            .arg(&asyncified_path)
+            .status()
+            .map_err(|e| GBasicError::CodegenError {
+                span: None,
+                message: format!("failed to run wasm-opt ({}): {e}. Install with: brew install binaryen", wasm_opt),
+            })?;
+
+        if asyncify_status.success() {
+            // Replace the original with the asyncified version
+            let _ = std::fs::remove_file(&wasm_path);
+            std::fs::rename(&asyncified_path, &wasm_path).map_err(|e| GBasicError::CodegenError {
+                span: None,
+                message: format!("failed to rename asyncified wasm: {e}"),
+            })?;
+        } else {
+            // Non-fatal: fall back to synchronous wasm
+            let _ = std::fs::remove_file(&asyncified_path);
+            eprintln!("warning: wasm-opt --asyncify failed; game loops will block the browser");
+        }
+
+        // Generate JS glue and HTML
+        crate::web_glue::generate_web_output(output_path)?;
+
+        Ok(())
     }
 
     fn emit_and_link(&self, output_path: &str) -> Result<(), GBasicError> {

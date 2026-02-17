@@ -259,7 +259,8 @@ mod tests {
         let program = parse(r#"print("Hello!")"#).unwrap();
         assert_eq!(program.statements.len(), 1);
         if let Statement::Expression { expr, .. } = &program.statements[0] {
-            assert!(matches!(expr, Expression::Call { .. }));
+            // print() desugars to Screen.Layer(0).Print() in the parser
+            assert!(matches!(expr, Expression::MethodChain { base: NamespaceRef::Screen, .. }));
         } else {
             panic!("expected expression statement");
         }
@@ -269,10 +270,12 @@ mod tests {
     fn test_string_interpolation_simple() {
         let program = parse(r#"print("Hello, {name}!")"#).unwrap();
         if let Statement::Expression { expr, .. } = &program.statements[0] {
-            if let Expression::Call { args, .. } = expr {
-                assert!(matches!(&args[0], Expression::StringInterp { parts, .. } if parts.len() == 3));
+            if let Expression::MethodChain { chain, .. } = expr {
+                // Last method in chain is Print with the interpolated string arg
+                let print_call = chain.last().expect("chain should not be empty");
+                assert!(matches!(&print_call.args[0], Expression::StringInterp { parts, .. } if parts.len() == 3));
             } else {
-                panic!("expected call");
+                panic!("expected MethodChain");
             }
         }
     }
@@ -281,13 +284,16 @@ mod tests {
     fn test_string_interpolation_with_expr() {
         let program = parse(r#"print("{x + y}")"#).unwrap();
         if let Statement::Expression { expr, .. } = &program.statements[0] {
-            if let Expression::Call { args, .. } = expr {
-                if let Expression::StringInterp { parts, .. } = &args[0] {
+            if let Expression::MethodChain { chain, .. } = expr {
+                let print_call = chain.last().expect("chain should not be empty");
+                if let Expression::StringInterp { parts, .. } = &print_call.args[0] {
                     assert_eq!(parts.len(), 1);
                     assert!(matches!(&parts[0], StringPart::Expr(Expression::BinaryOp { .. })));
                 } else {
                     panic!("expected interp");
                 }
+            } else {
+                panic!("expected MethodChain");
             }
         }
     }
@@ -417,6 +423,169 @@ mod tests {
         let program = parse(r#"let s = "a" + "b""#).unwrap();
         if let Statement::Let { value, .. } = &program.statements[0] {
             assert!(matches!(value, Expression::BinaryOp { op: BinaryOp::Add, .. }));
+        }
+    }
+
+    #[test]
+    fn test_compound_assign_plus() {
+        let program = parse("x += 1").unwrap();
+        if let Statement::Expression { expr, .. } = &program.statements[0] {
+            if let Expression::Assignment { target, value, .. } = expr {
+                assert!(matches!(target.as_ref(), Expression::Identifier(_)));
+                assert!(matches!(
+                    value.as_ref(),
+                    Expression::BinaryOp { op: BinaryOp::Add, .. }
+                ));
+            } else {
+                panic!("expected assignment");
+            }
+        }
+    }
+
+    #[test]
+    fn test_compound_assign_minus() {
+        let program = parse("score -= 10").unwrap();
+        if let Statement::Expression { expr, .. } = &program.statements[0] {
+            if let Expression::Assignment { value, .. } = expr {
+                assert!(matches!(
+                    value.as_ref(),
+                    Expression::BinaryOp { op: BinaryOp::Sub, .. }
+                ));
+            } else {
+                panic!("expected assignment");
+            }
+        }
+    }
+
+    #[test]
+    fn test_compound_assign_star() {
+        let program = parse("x *= 2").unwrap();
+        if let Statement::Expression { expr, .. } = &program.statements[0] {
+            if let Expression::Assignment { value, .. } = expr {
+                assert!(matches!(
+                    value.as_ref(),
+                    Expression::BinaryOp { op: BinaryOp::Mul, .. }
+                ));
+            } else {
+                panic!("expected assignment");
+            }
+        }
+    }
+
+    #[test]
+    fn test_compound_assign_slash() {
+        let program = parse("x /= 4").unwrap();
+        if let Statement::Expression { expr, .. } = &program.statements[0] {
+            if let Expression::Assignment { value, .. } = expr {
+                assert!(matches!(
+                    value.as_ref(),
+                    Expression::BinaryOp { op: BinaryOp::Div, .. }
+                ));
+            } else {
+                panic!("expected assignment");
+            }
+        }
+    }
+
+    #[test]
+    fn test_shortcut_print_desugars_to_method_chain() {
+        let program = parse(r#"print("hi")"#).unwrap();
+        if let Statement::Expression { expr, .. } = &program.statements[0] {
+            if let Expression::MethodChain { base, chain, .. } = expr {
+                assert_eq!(*base, NamespaceRef::Screen);
+                assert_eq!(chain[0].method.name, "layer");
+                assert_eq!(chain[1].method.name, "print");
+            } else {
+                panic!("expected MethodChain, got {:?}", expr);
+            }
+        }
+    }
+
+    #[test]
+    fn test_shortcut_random_desugars_to_method_chain() {
+        let program = parse("random(0, 10)").unwrap();
+        if let Statement::Expression { expr, .. } = &program.statements[0] {
+            if let Expression::MethodChain { base, chain, .. } = expr {
+                assert_eq!(*base, NamespaceRef::Math);
+                assert_eq!(chain[0].method.name, "random");
+                assert_eq!(chain[0].args.len(), 2);
+            } else {
+                panic!("expected MethodChain");
+            }
+        }
+    }
+
+    #[test]
+    fn test_shortcut_key_desugars_to_method_chain() {
+        let program = parse(r#"key("space")"#).unwrap();
+        if let Statement::Expression { expr, .. } = &program.statements[0] {
+            if let Expression::MethodChain { base, chain, .. } = expr {
+                assert_eq!(*base, NamespaceRef::Input);
+                assert_eq!(chain[0].method.name, "keyboard");
+                assert_eq!(chain[1].method.name, "key");
+            } else {
+                panic!("expected MethodChain");
+            }
+        }
+    }
+
+    #[test]
+    fn test_shortcut_abs_desugars_to_method_chain() {
+        let program = parse("abs(x)").unwrap();
+        if let Statement::Expression { expr, .. } = &program.statements[0] {
+            if let Expression::MethodChain { base, chain, .. } = expr {
+                assert_eq!(*base, NamespaceRef::Math);
+                assert_eq!(chain[0].method.name, "abs");
+            } else {
+                panic!("expected MethodChain");
+            }
+        }
+    }
+
+    #[test]
+    fn test_shortcut_wait_desugars_to_method_chain() {
+        let program = parse("wait(1)").unwrap();
+        if let Statement::Expression { expr, .. } = &program.statements[0] {
+            if let Expression::MethodChain { base, chain, .. } = expr {
+                assert_eq!(*base, NamespaceRef::System);
+                assert_eq!(chain[0].method.name, "wait");
+            } else {
+                panic!("expected MethodChain");
+            }
+        }
+    }
+
+    #[test]
+    fn test_tuple_literal_2_desugars_to_point() {
+        let program = parse("let v = (3, 5)").unwrap();
+        if let Statement::Let { value, .. } = &program.statements[0] {
+            if let Expression::Call { callee, args, .. } = value {
+                if let Expression::Identifier(id) = callee.as_ref() {
+                    assert_eq!(id.name, "point");
+                    assert_eq!(args.len(), 2);
+                } else {
+                    panic!("expected Identifier callee");
+                }
+            } else {
+                panic!("expected Call");
+            }
+        }
+    }
+
+    #[test]
+    fn test_tuple_literal_3_desugars_to_color() {
+        let program = parse("let c = (255, 0, 128)").unwrap();
+        if let Statement::Let { value, .. } = &program.statements[0] {
+            if let Expression::Call { callee, args, .. } = value {
+                if let Expression::Identifier(id) = callee.as_ref() {
+                    assert_eq!(id.name, "color");
+                    assert_eq!(args.len(), 3);
+                } else {
+                    panic!("expected Identifier callee");
+                }
+            } else {
+                panic!("expected Call");
+            }
         }
     }
 }

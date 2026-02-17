@@ -86,6 +86,14 @@ pub enum RawToken {
     Bang,
     #[token("=")]
     Eq,
+    #[token("+=")]
+    PlusEq,
+    #[token("-=")]
+    MinusEq,
+    #[token("*=")]
+    StarEq,
+    #[token("/=")]
+    SlashEq,
 
     // Delimiters
     #[token("(")]
@@ -180,6 +188,10 @@ pub enum Token {
     PipePipe,
     Bang,
     Eq,
+    PlusEq,
+    MinusEq,
+    StarEq,
+    SlashEq,
 
     // Delimiters
     LParen,
@@ -252,6 +264,10 @@ impl std::fmt::Display for Token {
             Token::PipePipe => write!(f, "||"),
             Token::Bang => write!(f, "!"),
             Token::Eq => write!(f, "="),
+            Token::PlusEq => write!(f, "+="),
+            Token::MinusEq => write!(f, "-="),
+            Token::StarEq => write!(f, "*="),
+            Token::SlashEq => write!(f, "/="),
             Token::LParen => write!(f, "("),
             Token::RParen => write!(f, ")"),
             Token::LBrace => write!(f, "{{"),
@@ -343,6 +359,10 @@ pub fn tokenize(source: &str) -> Vec<SpannedToken> {
                 RawToken::PipePipe => Token::PipePipe,
                 RawToken::Bang => Token::Bang,
                 RawToken::Eq => Token::Eq,
+                RawToken::PlusEq => Token::PlusEq,
+                RawToken::MinusEq => Token::MinusEq,
+                RawToken::StarEq => Token::StarEq,
+                RawToken::SlashEq => Token::SlashEq,
                 RawToken::LParen => Token::LParen,
                 RawToken::RParen => Token::RParen,
                 RawToken::LBrace => Token::LBrace,

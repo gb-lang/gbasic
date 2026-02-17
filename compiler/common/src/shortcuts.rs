@@ -1,8 +1,8 @@
 //! Layer 1 shortcut alias definitions.
 //!
 //! These are the "beginner-friendly" function names that desugar to namespace method chains.
-//! Actual handling is done at the codegen level — this table serves as the single source of
-//! truth for documentation, IDE support, and validation.
+//! Desugaring happens in the parser (`parse_postfix`) — this table is the single source of truth.
+//! Typechecker and codegen only see canonical `MethodChain` AST nodes.
 
 /// A shortcut alias definition.
 pub struct ShortcutDef {
@@ -16,7 +16,7 @@ pub struct ShortcutDef {
     pub description: &'static str,
 }
 
-/// All Layer 1 shortcuts. Codegen recognizes these names and emits the appropriate runtime calls.
+/// All Layer 1 shortcuts. Parser desugars calls matching these names into `MethodChain` nodes.
 pub static SHORTCUTS: &[ShortcutDef] = &[
     ShortcutDef {
         name: "print",
@@ -29,18 +29,6 @@ pub static SHORTCUTS: &[ShortcutDef] = &[
         namespace: "Screen",
         prefix_chain: "Layer(0).Clear",
         description: "Clear the screen with a color",
-    },
-    ShortcutDef {
-        name: "rect",
-        namespace: "Screen",
-        prefix_chain: "Layer(0).Rect",
-        description: "Create a rectangle game object",
-    },
-    ShortcutDef {
-        name: "circle",
-        namespace: "Screen",
-        prefix_chain: "Layer(0).Circle",
-        description: "Create a circle game object",
     },
     ShortcutDef {
         name: "random",
@@ -89,6 +77,24 @@ pub static SHORTCUTS: &[ShortcutDef] = &[
         namespace: "System",
         prefix_chain: "Log",
         description: "Log a debug message",
+    },
+    ShortcutDef {
+        name: "wait",
+        namespace: "System",
+        prefix_chain: "Wait",
+        description: "Sleep for a number of seconds",
+    },
+    ShortcutDef {
+        name: "clamp",
+        namespace: "Math",
+        prefix_chain: "Clamp",
+        description: "Clamp a value between min and max",
+    },
+    ShortcutDef {
+        name: "line",
+        namespace: "Screen",
+        prefix_chain: "Layer(0).Line",
+        description: "Draw a line between two points",
     },
 ];
 

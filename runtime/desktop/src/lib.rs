@@ -66,9 +66,9 @@ impl GameObject {
 thread_local! {
     static SDL_STATE: RefCell<Option<SdlState>> = const { RefCell::new(None) };
     static KEY_STATE: RefCell<HashMap<String, bool>> = RefCell::new(HashMap::new());
-    static MOUSE_STATE: RefCell<(i64, i64)> = const { RefCell::new((0, 0)) };
+    static MOUSE_STATE: RefCell<(i64, i64, bool)> = const { RefCell::new((0, 0, false)) };
     static MEMORY_STORE: RefCell<HashMap<String, i64>> = RefCell::new(HashMap::new());
-    static RNG_STATE: RefCell<u64> = const { RefCell::new(12345) };
+    static RNG_STATE: RefCell<u64> = RefCell::new(0);
     static SPRITE_HANDLES: RefCell<Vec<SpriteInfo>> = RefCell::new(Vec::new());
     static OBJECTS: RefCell<Vec<GameObject>> = RefCell::new(Vec::new());
     static SCREEN_AUTO_INIT: Cell<bool> = const { Cell::new(false) };
@@ -231,8 +231,16 @@ pub extern "C" fn runtime_input_poll() {
                 }
                 Event::MouseMotion { x, y, .. } => {
                     MOUSE_STATE.with(|ms| {
-                        *ms.borrow_mut() = (x as i64, y as i64);
+                        let mut s = ms.borrow_mut();
+                        s.0 = x as i64;
+                        s.1 = y as i64;
                     });
+                }
+                Event::MouseButtonDown { .. } => {
+                    MOUSE_STATE.with(|ms| { ms.borrow_mut().2 = true; });
+                }
+                Event::MouseButtonUp { .. } => {
+                    MOUSE_STATE.with(|ms| { ms.borrow_mut().2 = false; });
                 }
                 _ => {}
             }
@@ -259,6 +267,11 @@ pub extern "C" fn runtime_input_mouse_x() -> i64 {
 #[unsafe(no_mangle)]
 pub extern "C" fn runtime_input_mouse_y() -> i64 {
     MOUSE_STATE.with(|ms| ms.borrow().1)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn runtime_input_mouse_clicked() -> i64 {
+    MOUSE_STATE.with(|ms| if ms.borrow().2 { 1 } else { 0 })
 }
 
 // ─── Math namespace ───
@@ -294,6 +307,14 @@ pub extern "C" fn runtime_math_min(a: f64, b: f64) -> f64 { a.min(b) }
 pub extern "C" fn runtime_math_random() -> f64 {
     RNG_STATE.with(|rng| {
         let mut state = rng.borrow_mut();
+        // Lazy seed from system time on first call
+        if *state == 0 {
+            *state = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos() as u64)
+                .unwrap_or(0xdeadbeef_cafebabe);
+            if *state == 0 { *state = 0xdeadbeef_cafebabe; }
+        }
         // xorshift64
         let mut x = *state;
         x ^= x << 13;
@@ -306,6 +327,11 @@ pub extern "C" fn runtime_math_random() -> f64 {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn runtime_math_pi() -> f64 { std::f64::consts::PI }
+
+#[unsafe(no_mangle)]
+pub extern "C" fn runtime_math_clamp(v: f64, lo: f64, hi: f64) -> f64 {
+    v.clamp(lo, hi)
+}
 
 // ─── System namespace ───
 
@@ -320,6 +346,19 @@ pub extern "C" fn runtime_system_time() -> f64 {
 #[unsafe(no_mangle)]
 pub extern "C" fn runtime_system_sleep(ms: i64) {
     std::thread::sleep(std::time::Duration::from_millis(ms as u64));
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn runtime_system_wait(secs: f64) {
+    let ms = (secs * 1000.0) as u64;
+    std::thread::sleep(std::time::Duration::from_millis(ms));
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn runtime_system_log(msg: *const std::ffi::c_char) {
+    if let Some(s) = unsafe { read_cstr(msg) } {
+        eprintln!("[log] {s}");
+    }
 }
 
 #[unsafe(no_mangle)]
@@ -1153,6 +1192,13 @@ pub extern "C" fn runtime_math_random_range(min: i64, max: i64) -> i64 {
     }
     RNG_STATE.with(|rng| {
         let mut state = rng.borrow_mut();
+        if *state == 0 {
+            *state = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos() as u64)
+                .unwrap_or(0xdeadbeef_cafebabe);
+            if *state == 0 { *state = 0xdeadbeef_cafebabe; }
+        }
         let mut x = *state;
         x ^= x << 13;
         x ^= x >> 7;

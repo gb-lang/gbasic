@@ -83,6 +83,35 @@ impl Parser {
             });
         }
 
+        // Compound assignment: x += y  →  x = x + y
+        if matches!(
+            self.current(),
+            Token::PlusEq | Token::MinusEq | Token::StarEq | Token::SlashEq
+        ) {
+            let op = match self.current() {
+                Token::PlusEq => BinaryOp::Add,
+                Token::MinusEq => BinaryOp::Sub,
+                Token::StarEq => BinaryOp::Mul,
+                Token::SlashEq => BinaryOp::Div,
+                _ => unreachable!(),
+            };
+            self.advance();
+            let rhs = self.parse_assignment()?;
+            let rhs_span = rhs.span();
+            let span = expr.span().merge(rhs_span);
+            let binary = Expression::BinaryOp {
+                left: Box::new(expr.clone()),
+                op,
+                right: Box::new(rhs),
+                span,
+            };
+            return Ok(Expression::Assignment {
+                target: Box::new(expr),
+                value: Box::new(binary),
+                span,
+            });
+        }
+
         Ok(expr)
     }
 
@@ -155,6 +184,15 @@ impl Parser {
                     let args = self.parse_arg_list()?;
                     let end = self.expect(&Token::RParen)?;
                     let span = expr.span().merge(end);
+                    // Desugar Layer 1 shortcuts: print(x) → Screen.Layer(0).Print(x)
+                    if let Expression::Identifier(ref id) = expr {
+                        if let Some(desugared) =
+                            Parser::desugar_shortcut(&id.name, args.clone(), span)
+                        {
+                            expr = desugared;
+                            continue;
+                        }
+                    }
                     expr = Expression::Call {
                         callee: Box::new(expr),
                         args,

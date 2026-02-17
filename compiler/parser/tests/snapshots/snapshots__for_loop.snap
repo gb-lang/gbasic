@@ -1,5 +1,6 @@
 ---
 source: compiler/parser/tests/snapshots.rs
+assertion_line: 24
 expression: program
 ---
 statements:
@@ -32,19 +33,38 @@ statements:
         statements:
           - Expression:
               expr:
-                Call:
-                  callee:
-                    Identifier:
-                      name: print
+                MethodChain:
+                  base: Screen
+                  chain:
+                    - method:
+                        name: layer
+                        span:
+                          start: 17
+                          end: 25
+                      args:
+                        - Literal:
+                            kind:
+                              Int: 0
+                            span:
+                              start: 17
+                              end: 25
                       span:
                         start: 17
-                        end: 22
-                  args:
-                    - Identifier:
-                        name: i
+                        end: 25
+                    - method:
+                        name: print
                         span:
-                          start: 23
-                          end: 24
+                          start: 17
+                          end: 25
+                      args:
+                        - Identifier:
+                            name: i
+                            span:
+                              start: 23
+                              end: 24
+                      span:
+                        start: 17
+                        end: 25
                   span:
                     start: 17
                     end: 25

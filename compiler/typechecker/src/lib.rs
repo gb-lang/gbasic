@@ -17,12 +17,18 @@ pub fn check(program: &Program) -> Result<(), GBasicError> {
 
 struct TypeChecker {
     symbols: SymbolTable,
+    /// Depth of loop nesting — used to validate break/continue placement
+    loop_depth: usize,
+    /// Return type expected by the current function body (None = top level)
+    current_return_type: Option<Type>,
 }
 
 impl TypeChecker {
     fn new() -> Self {
         Self {
             symbols: SymbolTable::new(),
+            loop_depth: 0,
+            current_return_type: None,
         }
     }
 
@@ -38,16 +44,25 @@ impl TypeChecker {
                 mutable: false,
             },
         );
-        // Layer 1 shortcuts
+        // Layer 1 shortcuts and value constructors
         let builtins: &[(&str, Vec<Type>, Type)] = &[
-            ("rect", vec![Type::Unknown, Type::Unknown], Type::Int),
-            ("circle", vec![Type::Unknown], Type::Int),
-            ("key", vec![Type::String], Type::Bool),
-            ("play", vec![Type::String], Type::Void),
-            ("clear", vec![Type::Unknown], Type::Void),
-            ("random", vec![Type::Int, Type::Int], Type::Int),
-            ("point", vec![Type::Unknown, Type::Unknown], Type::Unknown),
-            ("color", vec![Type::Int, Type::Int, Type::Int], Type::Unknown),
+            ("rect",   vec![Type::Unknown, Type::Unknown], Type::Int),
+            ("circle", vec![Type::Unknown],                Type::Int),
+            ("key",    vec![Type::String],                 Type::Bool),
+            ("play",   vec![Type::String],                 Type::Void),
+            ("clear",  vec![Type::Unknown],                Type::Void),
+            ("random", vec![Type::Int, Type::Int],         Type::Int),
+            // Value constructors — return proper types
+            ("point",  vec![Type::Unknown, Type::Unknown],              Type::Point),
+            ("color",  vec![Type::Unknown, Type::Unknown, Type::Unknown], Type::Color),
+            // Math shortcuts
+            ("abs",   vec![Type::Float], Type::Float),
+            ("sqrt",  vec![Type::Float], Type::Float),
+            ("sin",   vec![Type::Float], Type::Float),
+            ("cos",   vec![Type::Float], Type::Float),
+            ("clamp", vec![Type::Float, Type::Float, Type::Float], Type::Float),
+            ("wait",  vec![Type::Float], Type::Void),
+            ("log",   vec![Type::Unknown], Type::Void),
         ];
         for (name, params, ret) in builtins {
             self.symbols.insert(
@@ -61,26 +76,31 @@ impl TypeChecker {
                 },
             );
         }
-        // Named colors as global constants
+        // Named colors as Color-typed global constants
         for color in &[
             "black", "white", "red", "green", "blue", "yellow",
             "orange", "purple", "pink", "cyan", "gray", "grey", "brown",
         ] {
             self.symbols.insert(
                 (*color).into(),
-                Symbol { ty: Type::Int, mutable: false },
+                Symbol { ty: Type::Color, mutable: false },
             );
         }
+        // mouse as a pseudo-object (field access checked leniently)
+        self.symbols.insert(
+            "mouse".into(),
+            Symbol { ty: Type::Unknown, mutable: false },
+        );
+        // screen as a pseudo-object
+        self.symbols.insert(
+            "screen".into(),
+            Symbol { ty: Type::Unknown, mutable: false },
+        );
     }
 
     fn check_statement(&mut self, stmt: &Statement) -> Result<(), GBasicError> {
         match stmt {
-            Statement::Let {
-                name,
-                type_ann,
-                value,
-                span,
-            } => {
+            Statement::Let { name, type_ann, value, span } => {
                 let val_ty = self.check_expression(value)?;
                 let ty = if let Some(ann) = type_ann {
                     if !Self::types_compatible(ann, &val_ty) {
@@ -119,33 +139,26 @@ impl TypeChecker {
                     },
                 );
 
+                // Check body with return type context
+                let prev_ret = self.current_return_type.replace(ret_type.clone());
                 self.symbols.push_scope();
                 for (param, ty) in func.params.iter().zip(param_types.iter()) {
                     self.symbols.insert(
                         param.name.name.clone(),
-                        Symbol {
-                            ty: ty.clone(),
-                            mutable: true,
-                        },
+                        Symbol { ty: ty.clone(), mutable: true },
                     );
                 }
                 for s in &func.body.statements {
                     self.check_statement(s)?;
                 }
                 self.symbols.pop_scope();
+                self.current_return_type = prev_ret;
             }
-            Statement::If {
-                condition,
-                then_block,
-                else_block,
-                span,
-            } => {
+            Statement::If { condition, then_block, else_block, span } => {
                 let cond_ty = self.check_expression(condition)?;
                 if !Self::types_compatible(&Type::Bool, &cond_ty) {
                     return Err(GBasicError::TypeError {
-                        message: format!(
-                            "if condition must be Bool, found {cond_ty}"
-                        ),
+                        message: format!("if condition must be Bool, found {cond_ty}"),
                         span: *span,
                     });
                 }
@@ -154,28 +167,19 @@ impl TypeChecker {
                     self.check_block(else_b)?;
                 }
             }
-            Statement::While {
-                condition,
-                body,
-                span,
-            } => {
+            Statement::While { condition, body, span } => {
                 let cond_ty = self.check_expression(condition)?;
                 if !Self::types_compatible(&Type::Bool, &cond_ty) {
                     return Err(GBasicError::TypeError {
-                        message: format!(
-                            "while condition must be Bool, found {cond_ty}"
-                        ),
+                        message: format!("while condition must be Bool, found {cond_ty}"),
                         span: *span,
                     });
                 }
+                self.loop_depth += 1;
                 self.check_block(body)?;
+                self.loop_depth -= 1;
             }
-            Statement::For {
-                variable,
-                iterable,
-                body,
-                ..
-            } => {
+            Statement::For { variable, iterable, body, .. } => {
                 let iter_ty = self.check_expression(iterable)?;
                 let var_ty = match &iter_ty {
                     Type::Array(inner) => *inner.clone(),
@@ -184,19 +188,31 @@ impl TypeChecker {
                 self.symbols.push_scope();
                 self.symbols.insert(
                     variable.name.clone(),
-                    Symbol {
-                        ty: var_ty,
-                        mutable: false,
-                    },
+                    Symbol { ty: var_ty, mutable: false },
                 );
+                self.loop_depth += 1;
                 for s in &body.statements {
                     self.check_statement(s)?;
                 }
+                self.loop_depth -= 1;
                 self.symbols.pop_scope();
             }
-            Statement::Return { value, .. } => {
-                if let Some(val) = value {
-                    self.check_expression(val)?;
+            Statement::Return { value, span } => {
+                let actual_ty = if let Some(val) = value {
+                    self.check_expression(val)?
+                } else {
+                    Type::Void
+                };
+                // Validate against declared return type
+                if let Some(ref expected) = self.current_return_type.clone() {
+                    if !Self::types_compatible(expected, &actual_ty) {
+                        return Err(GBasicError::TypeError {
+                            message: format!(
+                                "return type mismatch: function declared to return {expected}, found {actual_ty}"
+                            ),
+                            span: *span,
+                        });
+                    }
                 }
             }
             Statement::Expression { expr, .. } => {
@@ -205,15 +221,28 @@ impl TypeChecker {
             Statement::Block(block) => {
                 self.check_block(block)?;
             }
-            Statement::Match {
-                subject, arms, ..
-            } => {
+            Statement::Match { subject, arms, .. } => {
                 self.check_expression(subject)?;
                 for arm in arms {
                     self.check_block(&arm.body)?;
                 }
             }
-            Statement::Break { .. } | Statement::Continue { .. } => {}
+            Statement::Break { span } => {
+                if self.loop_depth == 0 {
+                    return Err(GBasicError::TypeError {
+                        message: "'break' used outside of a loop".into(),
+                        span: *span,
+                    });
+                }
+            }
+            Statement::Continue { span } => {
+                if self.loop_depth == 0 {
+                    return Err(GBasicError::TypeError {
+                        message: "'continue' used outside of a loop".into(),
+                        span: *span,
+                    });
+                }
+            }
         }
         Ok(())
     }
@@ -332,14 +361,23 @@ impl TypeChecker {
             } => {
                 let val_ty = self.check_expression(value)?;
                 if let Expression::Identifier(id) = target.as_ref() {
-                    let target_ty = self
+                    let sym = self
                         .symbols
                         .lookup(&id.name)
-                        .map(|s| s.ty.clone())
                         .ok_or(GBasicError::NameError {
                             message: format!("undefined variable '{}'", id.name),
                             span: id.span,
                         })?;
+                    if !sym.mutable {
+                        return Err(GBasicError::TypeError {
+                            message: format!(
+                                "cannot assign to '{}': variable is immutable",
+                                id.name
+                            ),
+                            span: *span,
+                        });
+                    }
+                    let target_ty = sym.ty.clone();
                     if !Self::types_compatible(&target_ty, &val_ty) {
                         return Err(GBasicError::TypeError {
                             message: format!(
@@ -350,6 +388,7 @@ impl TypeChecker {
                     }
                     Ok(target_ty)
                 } else {
+                    // Field access assignment (obj.prop = val) — allow leniently
                     Ok(val_ty)
                 }
             }
@@ -612,6 +651,79 @@ mod tests {
     fn break_continue_in_loop() {
         assert!(check_src("while true { break }").is_ok());
         assert!(check_src("for i in 0..10 { continue }").is_ok());
+    }
+
+    #[test]
+    fn break_outside_loop_is_error() {
+        let r = check_src("break");
+        assert!(r.is_err());
+        let msg = r.unwrap_err().to_string();
+        assert!(msg.contains("outside of a loop"), "got: {msg}");
+    }
+
+    #[test]
+    fn continue_outside_loop_is_error() {
+        let r = check_src("continue");
+        assert!(r.is_err());
+        let msg = r.unwrap_err().to_string();
+        assert!(msg.contains("outside of a loop"), "got: {msg}");
+    }
+
+    #[test]
+    fn break_in_nested_loop_ok() {
+        assert!(check_src("while true { for i in 0..5 { break } }").is_ok());
+    }
+
+    #[test]
+    fn return_type_mismatch_is_error() {
+        let r = check_src("fun f() -> Int { return \"hello\" }");
+        assert!(r.is_err());
+        let msg = r.unwrap_err().to_string();
+        assert!(msg.contains("return type mismatch"), "got: {msg}");
+    }
+
+    #[test]
+    fn return_type_match_ok() {
+        assert!(check_src("fun f() -> Int { return 42 }").is_ok());
+        assert!(check_src("fun g() -> Bool { return true }").is_ok());
+        assert!(check_src("fun h() -> Float { return 3.14 }").is_ok());
+    }
+
+    #[test]
+    fn return_void_ok() {
+        assert!(check_src("fun f() { return }").is_ok());
+    }
+
+    #[test]
+    fn mutability_immutable_var_error() {
+        // for-loop variable is immutable
+        let r = check_src("for i in 0..10 { i = 5 }");
+        assert!(r.is_err());
+        let msg = r.unwrap_err().to_string();
+        assert!(msg.contains("immutable"), "got: {msg}");
+    }
+
+    #[test]
+    fn mutability_let_var_is_mutable() {
+        assert!(check_src("let x = 1\nx = 2").is_ok());
+    }
+
+    #[test]
+    fn mutability_named_color_immutable() {
+        let r = check_src("white = 42");
+        assert!(r.is_err());
+        let msg = r.unwrap_err().to_string();
+        assert!(msg.contains("immutable"), "got: {msg}");
+    }
+
+    #[test]
+    fn point_constructor_returns_point_type() {
+        assert!(check_src("let p = point(1.0, 2.0)").is_ok());
+    }
+
+    #[test]
+    fn color_constructor_returns_color_type() {
+        assert!(check_src("let c = color(255, 0, 128)").is_ok());
     }
 
     #[test]

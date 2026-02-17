@@ -8,6 +8,10 @@ pub enum Type {
     String,
     Bool,
     Void,
+    /// Point(x, y) — 2D vector value type
+    Point,
+    /// Color(r, g, b) — packed RGB color value type
+    Color,
     Array(Box<Type>),
     /// A function type: (param_types) -> return_type
     Function {
@@ -26,6 +30,8 @@ impl std::fmt::Display for Type {
             Type::String => write!(f, "String"),
             Type::Bool => write!(f, "Bool"),
             Type::Void => write!(f, "Void"),
+            Type::Point => write!(f, "Point"),
+            Type::Color => write!(f, "Color"),
             Type::Array(inner) => write!(f, "[{inner}]"),
             Type::Function { params, ret } => {
                 write!(f, "(")?;

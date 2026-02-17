@@ -68,6 +68,7 @@ fn method_to_snake(method: &str) -> &str {
         "effectload" => "effect_load",
         "effectplay" => "effect_play",
         "effectvolume" => "effect_volume",
+        "random_range" => "random_range",
         other => other,
     }
 }
@@ -81,6 +82,8 @@ fn get_namespace_method(namespace: NamespaceRef, method: &str) -> Option<MethodE
         (Math, "sin" | "cos" | "sqrt" | "abs" | "floor" | "ceil") => (vec![F64], F64),
         (Math, "pow" | "max" | "min") => (vec![F64, F64], F64),
         (Math, "random" | "pi") => (vec![], F64),
+        (Math, "random_range") => (vec![I64, I64], I64),
+        (Math, "clamp") => (vec![F64, F64, F64], F64),
         // Screen
         (Screen, "init") => (vec![I64, I64], Void),
         (Screen, "clear") => (vec![I64, I64, I64], Void),
@@ -101,6 +104,8 @@ fn get_namespace_method(namespace: NamespaceRef, method: &str) -> Option<MethodE
         // System
         (System, "time") => (vec![], F64),
         (System, "sleep") => (vec![I64], Void),
+        (System, "wait") => (vec![F64], Void),
+        (System, "log") => (vec![Ptr], Void),
         (System, "exit") => (vec![I64], Void),
         (System, "framebegin") => (vec![], Void),
         (System, "frameend") => (vec![], Void),
@@ -1291,32 +1296,37 @@ impl<'ctx> Codegen<'ctx> {
     ) -> Result<Option<BasicValueEnum<'ctx>>, GBasicError> {
         let mut last_result: Option<BasicValueEnum<'ctx>> = None;
         let mut last_screen_pos: Option<String> = None;
+        // Track whether the last call was a print (for .at() chaining)
+        let mut pending_print_arg: Option<Expression> = None;
 
-        for call in chain {
-            let method_name = &call.method.name; // already lowercased by lexer
+        let mut i = 0;
+        while i < chain.len() {
+            let call = &chain[i];
+            let method_name = call.method.name.as_str();
 
-            // Handle Screen properties that aren't in the namespace table
+            // ── Screen shortcuts ──────────────────────────────────────────────
             if namespace == NamespaceRef::Screen {
-                match method_name.as_str() {
+                match method_name {
                     "center" | "bottom_center" | "top_center" | "top_left" | "top_right"
                     | "bottom_left" | "bottom_right" => {
                         self.call_runtime("ensure_screen_init", &[], LType::Void, &[]);
-                        last_screen_pos = Some(method_name.clone());
+                        last_screen_pos = Some(method_name.to_string());
                         last_result = self.call_runtime("runtime_screen_center_x", &[], LType::F64, &[]);
+                        pending_print_arg = None;
+                        i += 1;
                         continue;
                     }
-                    // .x / .y after a Screen position property (e.g., Screen.center.y)
                     "x" | "y" if last_screen_pos.is_some() => {
-                        let pos_name = last_screen_pos.as_deref().unwrap();
+                        let pos_name = last_screen_pos.as_deref().unwrap().to_string();
                         let f64_type = self.context.f64_type();
-                        last_result = Some(match (pos_name, method_name.as_str()) {
+                        last_result = Some(match (pos_name.as_str(), method_name) {
                             ("center", "x") | ("top_center", "x") | ("bottom_center", "x") =>
                                 self.call_runtime("runtime_screen_center_x", &[], LType::F64, &[]).unwrap(),
                             ("center", "y") =>
                                 self.call_runtime("runtime_screen_center_y", &[], LType::F64, &[]).unwrap(),
                             ("bottom_center", "y") | ("bottom_left", "y") | ("bottom_right", "y") => {
                                 let h = self.call_runtime("runtime_screen_height", &[], LType::I64, &[]).unwrap();
-                                self.builder.build_signed_int_to_float(h.into_int_value(), f64_type, "hf").unwrap().into()
+                                self.builder.build_signed_int_to_float(h.into_int_value(), f64_type, "sh").unwrap().into()
                             }
                             ("top_left", "x") | ("top_left", "y") | ("top_center", "y")
                             | ("bottom_left", "x") => f64_type.const_float(0.0).into(),
@@ -1328,22 +1338,180 @@ impl<'ctx> Codegen<'ctx> {
                             _ => self.call_runtime("runtime_screen_center_x", &[], LType::F64, &[]).unwrap(),
                         });
                         last_screen_pos = None;
+                        pending_print_arg = None;
+                        i += 1;
+                        continue;
+                    }
+                    // Layer(n) — shortcut desugaring prefix; just skip, layer index ignored for now
+                    "layer" => {
+                        self.call_runtime("ensure_screen_init", &[], LType::Void, &[]);
+                        last_screen_pos = None;
+                        pending_print_arg = None;
+                        i += 1;
+                        continue;
+                    }
+                    // print(text) — shortcut desugared form of Screen.Layer(0).Print(text)
+                    "print" if !call.args.is_empty() => {
+                        // Check if the next method in chain is "at" — if so, draw on screen
+                        if i + 1 < chain.len() && chain[i + 1].method.name == "at"
+                            && chain[i + 1].args.len() == 2
+                        {
+                            let text_arg = call.args[0].clone();
+                            let x_arg = chain[i + 1].args[0].clone();
+                            let y_arg = chain[i + 1].args[1].clone();
+                            last_result = self.codegen_print_at(&text_arg, &x_arg, &y_arg)?;
+                            pending_print_arg = None;
+                            i += 2; // consume both print and at
+                            continue;
+                        }
+                        // Plain print — emit to stdout
+                        last_result = self.codegen_print(&call.args[0])?;
+                        pending_print_arg = Some(call.args[0].clone());
+                        i += 1;
+                        continue;
+                    }
+                    // at(x, y) — chained after print; draw on screen
+                    "at" if call.args.len() == 2 => {
+                        if let Some(ref text_arg) = pending_print_arg.clone() {
+                            let x_arg = call.args[0].clone();
+                            let y_arg = call.args[1].clone();
+                            last_result = self.codegen_print_at(text_arg, &x_arg, &y_arg)?;
+                        }
+                        pending_print_arg = None;
+                        i += 1;
+                        continue;
+                    }
+                    // clear(color) — shortcut desugared form of Screen.Layer(0).Clear(color)
+                    "clear" => {
+                        self.call_runtime("ensure_screen_init", &[], LType::Void, &[]);
+                        if call.args.len() == 1 {
+                            let val = self.codegen_expression(&call.args[0])?.unwrap();
+                            let i64_type = self.context.i64_type();
+                            let iv = val.into_int_value();
+                            let r = self.builder.build_right_shift(iv, i64_type.const_int(16, false), false, "r").unwrap();
+                            let g = self.builder.build_right_shift(iv, i64_type.const_int(8, false), false, "g").unwrap();
+                            let b = self.builder.build_and(iv, i64_type.const_int(0xFF, false), "b").unwrap();
+                            let r = self.builder.build_and(r, i64_type.const_int(0xFF, false), "r").unwrap();
+                            let g = self.builder.build_and(g, i64_type.const_int(0xFF, false), "g").unwrap();
+                            self.call_runtime("runtime_screen_clear", &[LType::I64, LType::I64, LType::I64], LType::Void, &[r.into(), g.into(), b.into()]);
+                        } else if call.args.len() == 3 {
+                            let r = self.codegen_expression(&call.args[0])?.unwrap();
+                            let g = self.codegen_expression(&call.args[1])?.unwrap();
+                            let b = self.codegen_expression(&call.args[2])?.unwrap();
+                            self.call_runtime("runtime_screen_clear", &[LType::I64, LType::I64, LType::I64], LType::Void, &[r.into(), g.into(), b.into()]);
+                        } else {
+                            // clear() with no args — clear to black
+                            let zero = self.context.i64_type().const_int(0, false);
+                            self.call_runtime("runtime_screen_clear", &[LType::I64, LType::I64, LType::I64], LType::Void, &[zero.into(), zero.into(), zero.into()]);
+                        }
+                        last_result = None;
+                        pending_print_arg = None;
+                        i += 1;
+                        continue;
+                    }
+                    // line(from_x, from_y, to_x, to_y, r, g, b) — Screen.Layer(0).Line(...)
+                    "line" if call.args.len() == 4 => {
+                        self.call_runtime("ensure_screen_init", &[], LType::Void, &[]);
+                        let x1 = self.codegen_expression(&call.args[0])?.unwrap();
+                        let y1 = self.codegen_expression(&call.args[1])?.unwrap();
+                        let x2 = self.codegen_expression(&call.args[2])?.unwrap();
+                        let y2 = self.codegen_expression(&call.args[3])?.unwrap();
+                        let white = self.context.i64_type().const_int(255, false);
+                        let x1i = self.coerce_to_ltype(x1, &self.infer_expr_type(&call.args[0]), LType::I64)?;
+                        let y1i = self.coerce_to_ltype(y1, &self.infer_expr_type(&call.args[1]), LType::I64)?;
+                        let x2i = self.coerce_to_ltype(x2, &self.infer_expr_type(&call.args[2]), LType::I64)?;
+                        let y2i = self.coerce_to_ltype(y2, &self.infer_expr_type(&call.args[3]), LType::I64)?;
+                        self.call_runtime("runtime_screen_draw_line", &[LType::I64, LType::I64, LType::I64, LType::I64, LType::I64, LType::I64, LType::I64], LType::Void,
+                            &[x1i.into(), y1i.into(), x2i.into(), y2i.into(), white.into(), white.into(), white.into()]);
+                        last_result = None;
+                        pending_print_arg = None;
+                        i += 1;
                         continue;
                     }
                     _ => {}
                 }
             }
 
+            // ── Input shortcuts ───────────────────────────────────────────────
+            if namespace == NamespaceRef::Input {
+                match method_name {
+                    // keyboard — intermediate segment of key("x") desugaring; skip
+                    "keyboard" => {
+                        pending_print_arg = None;
+                        i += 1;
+                        continue;
+                    }
+                    // key("name") — check if key is pressed
+                    "key" if !call.args.is_empty() => {
+                        self.call_runtime("ensure_screen_init", &[], LType::Void, &[]);
+                        let key_val = self.codegen_expression(&call.args[0])?.unwrap();
+                        last_result = self.call_runtime("runtime_input_key_pressed", &[LType::Ptr], LType::Bool, &[key_val.into()]);
+                        pending_print_arg = None;
+                        i += 1;
+                        continue;
+                    }
+                    _ => {}
+                }
+            }
+
+            // ── Sound shortcuts ───────────────────────────────────────────────
+            if namespace == NamespaceRef::Sound {
+                match method_name {
+                    // effect("name") — intermediate segment; store name for play()
+                    "effect" if !call.args.is_empty() => {
+                        // The next call should be play() — emit play directly with the name arg
+                        if i + 1 < chain.len() && chain[i + 1].method.name == "play" {
+                            let name_val = self.codegen_expression(&call.args[0])?.unwrap();
+                            self.call_runtime("runtime_sound_effect_play", &[LType::Ptr], LType::Void, &[name_val.into()]);
+                            last_result = None;
+                            pending_print_arg = None;
+                            i += 2; // consume both effect and play
+                            continue;
+                        }
+                        // effect() without play() — load the effect
+                        let name_val = self.codegen_expression(&call.args[0])?.unwrap();
+                        last_result = self.call_runtime("runtime_sound_effect_load", &[LType::Ptr], LType::I64, &[name_val.into()]);
+                        pending_print_arg = None;
+                        i += 1;
+                        continue;
+                    }
+                    // play() standalone (after effect handle) — skip for now
+                    "play" => {
+                        pending_print_arg = None;
+                        i += 1;
+                        continue;
+                    }
+                    _ => {}
+                }
+            }
+
+            // ── Math shortcuts ────────────────────────────────────────────────
+            if namespace == NamespaceRef::Math {
+                match method_name {
+                    // random(min, max) — 2-arg form maps to random_range
+                    "random" if call.args.len() == 2 => {
+                        let min = self.codegen_expression(&call.args[0])?.unwrap();
+                        let max = self.codegen_expression(&call.args[1])?.unwrap();
+                        let mini = self.coerce_to_ltype(min, &self.infer_expr_type(&call.args[0]), LType::I64)?;
+                        let maxi = self.coerce_to_ltype(max, &self.infer_expr_type(&call.args[1]), LType::I64)?;
+                        last_result = self.call_runtime("runtime_math_random_range", &[LType::I64, LType::I64], LType::I64, &[mini.into(), maxi.into()]);
+                        pending_print_arg = None;
+                        i += 1;
+                        continue;
+                    }
+                    _ => {}
+                }
+            }
+
+            // ── Generic namespace dispatch ─────────────────────────────────────
             let (function, param_types, ret_type) = self.get_or_declare_runtime_fn(namespace, method_name)?;
 
-            // Codegen args, casting as needed
             let mut compiled_args: Vec<BasicMetadataValueEnum> = Vec::new();
-            for (i, arg) in call.args.iter().enumerate() {
+            for (j, arg) in call.args.iter().enumerate() {
                 let val = self.codegen_expression(arg)?.ok_or_else(|| GBasicError::CodegenError {
                     span: None, message: format!("void expression as argument to {namespace}.{method_name}"),
                 })?;
-
-                let expected = param_types.get(i).copied().unwrap_or(LType::I64);
+                let expected = param_types.get(j).copied().unwrap_or(LType::I64);
                 let converted = self.coerce_to_ltype(val, &self.infer_expr_type(arg), expected)?;
                 compiled_args.push(converted.into());
             }
@@ -1356,6 +1524,8 @@ impl<'ctx> Codegen<'ctx> {
                 LType::Void => None,
                 _ => call_result.try_as_basic_value().left(),
             };
+            pending_print_arg = None;
+            i += 1;
         }
 
         Ok(last_result)
@@ -1391,23 +1561,12 @@ impl<'ctx> Codegen<'ctx> {
     ) -> Result<Option<BasicValueEnum<'ctx>>, GBasicError> {
         // Handle method calls on objects: obj.method(args)
         if let Expression::FieldAccess { object, field, .. } = callee {
-            // Special: print("text").at(x, y) → draw text on screen
-            if field.name == "at" && args.len() == 2 {
-                if let Expression::Call { callee: inner_callee, args: print_args, .. } = object.as_ref() {
-                    if let Expression::Identifier(id) = inner_callee.as_ref() {
-                        if id.name == "print" && print_args.len() == 1 {
-                            return self.codegen_print_at(&print_args[0], &args[0], &args[1]);
-                        }
-                    }
-                }
-            }
             return self.codegen_object_method(object, &field.name, args);
         }
 
         if let Expression::Identifier(id) = callee {
-            // Layer 1 builtin shortcuts
+            // Object constructors — still emitted as Call nodes (not shortcuts)
             match id.name.as_str() {
-                "print" if args.len() == 1 => return self.codegen_print(&args[0]),
                 "rect" if args.len() == 2 => {
                     let w = self.codegen_expression(&args[0])?.unwrap();
                     let h = self.codegen_expression(&args[1])?.unwrap();
@@ -1420,53 +1579,10 @@ impl<'ctx> Codegen<'ctx> {
                     let rf = self.coerce_to_ltype(r, &self.infer_expr_type(&args[0]), LType::F64)?;
                     return Ok(self.call_runtime("runtime_create_circle", &[LType::F64], LType::I64, &[rf.into()]));
                 }
-                "key" if args.len() == 1 => {
-                    // Ensure screen is init (for input polling)
-                    self.call_runtime("ensure_screen_init", &[], LType::Void, &[]);
-                    let key_val = self.codegen_expression(&args[0])?.unwrap();
-                    return Ok(self.call_runtime("runtime_input_key_pressed", &[LType::Ptr], LType::Bool, &[key_val.into()]));
-                }
-                "play" if args.len() == 1 => {
-                    let name = self.codegen_expression(&args[0])?.unwrap();
-                    self.call_runtime("runtime_sound_effect_play", &[LType::Ptr], LType::Void, &[name.into()]);
-                    return Ok(None);
-                }
-                "clear" => {
-                    self.call_runtime("ensure_screen_init", &[], LType::Void, &[]);
-                    if args.len() == 1 {
-                        // clear(named_color) or clear(packed_color)
-                        let val = self.codegen_expression(&args[0])?.unwrap();
-                        // Unpack i64 color: r = (v >> 16) & 0xFF, g = (v >> 8) & 0xFF, b = v & 0xFF
-                        let i64_type = self.context.i64_type();
-                        let iv = val.into_int_value();
-                        let r = self.builder.build_right_shift(iv, i64_type.const_int(16, false), false, "r").unwrap();
-                        let g = self.builder.build_right_shift(iv, i64_type.const_int(8, false), false, "g").unwrap();
-                        let b = self.builder.build_and(iv, i64_type.const_int(0xFF, false), "b").unwrap();
-                        let r = self.builder.build_and(r, i64_type.const_int(0xFF, false), "r").unwrap();
-                        let g = self.builder.build_and(g, i64_type.const_int(0xFF, false), "g").unwrap();
-                        self.call_runtime("runtime_screen_clear", &[LType::I64, LType::I64, LType::I64], LType::Void, &[r.into(), g.into(), b.into()]);
-                    } else if args.len() == 3 {
-                        let r = self.codegen_expression(&args[0])?.unwrap();
-                        let g = self.codegen_expression(&args[1])?.unwrap();
-                        let b = self.codegen_expression(&args[2])?.unwrap();
-                        self.call_runtime("runtime_screen_clear", &[LType::I64, LType::I64, LType::I64], LType::Void, &[r.into(), g.into(), b.into()]);
-                    }
-                    return Ok(None);
-                }
-                "random" if args.len() == 2 => {
-                    let min = self.codegen_expression(&args[0])?.unwrap();
-                    let max = self.codegen_expression(&args[1])?.unwrap();
-                    return Ok(self.call_runtime("runtime_math_random_range", &[LType::I64, LType::I64], LType::I64, &[min.into(), max.into()]));
-                }
                 "point" if args.len() == 2 => {
-                    // Point(x, y) constructor — pack as two f64 values
-                    // For now, just return x as the primary value (used contextually in property setters)
-                    // Point is handled specially in property assignment context
+                    // Point(x, y) constructor — only meaningful in property assignment context
                     let x = self.codegen_expression(&args[0])?.unwrap();
                     let _y = self.codegen_expression(&args[1])?.unwrap();
-                    // Store both in a temp struct... Actually for MVP, Point() is only meaningful
-                    // in assignment context like `obj.position = Point(x, y)`.
-                    // When used standalone, just return x (not great but workable).
                     return Ok(Some(x));
                 }
                 _ => {}
@@ -1833,10 +1949,8 @@ impl<'ctx> Codegen<'ctx> {
             Expression::Call { callee, .. } => {
                 if let Expression::Identifier(id) = callee.as_ref() {
                     match id.name.as_str() {
-                        "print" | "play" | "clear" => return Type::Void,
+                        // Object constructors — still Call nodes
                         "rect" | "circle" => return Type::Int, // handle is i64
-                        "key" => return Type::Bool,
-                        "random" => return Type::Int,
                         "point" => return Type::Float, // MVP: Point returns float-ish
                         _ => {}
                     }
@@ -1871,10 +1985,38 @@ impl<'ctx> Codegen<'ctx> {
             Expression::Assignment { value, .. } => self.infer_expr_type(value),
             Expression::MethodChain { base, chain, .. } => {
                 if let Some(last) = chain.last() {
-                    // Screen properties
+                    // Screen shortcut methods
                     if *base == NamespaceRef::Screen {
                         match last.method.name.as_str() {
                             "center" | "bottom_center" | "top_center" => return Type::Float,
+                            "print" | "clear" | "line" | "at" => return Type::Void,
+                            _ => {}
+                        }
+                    }
+                    // Input shortcut methods
+                    if *base == NamespaceRef::Input {
+                        match last.method.name.as_str() {
+                            "key" | "keypressed" => return Type::Bool,
+                            _ => {}
+                        }
+                    }
+                    // Sound shortcut methods
+                    if *base == NamespaceRef::Sound {
+                        match last.method.name.as_str() {
+                            "play" | "effect" => return Type::Void,
+                            _ => {}
+                        }
+                    }
+                    // Math shortcut: random(min,max) returns Int
+                    if *base == NamespaceRef::Math {
+                        if last.method.name == "random" && last.args.len() == 2 {
+                            return Type::Int;
+                        }
+                    }
+                    // System shortcuts
+                    if *base == NamespaceRef::System {
+                        match last.method.name.as_str() {
+                            "wait" | "log" => return Type::Void,
                             _ => {}
                         }
                     }
@@ -2217,6 +2359,20 @@ impl<'ctx> Codegen<'ctx> {
                 };
             }
 
+            // Handle mouse.x, mouse.y, mouse.clicked
+            if var_name == "mouse" {
+                self.call_runtime("ensure_screen_init", &[], LType::Void, &[]);
+                return match prop_path.as_str() {
+                    "x" => Ok(self.call_runtime("runtime_input_mouse_x", &[], LType::I64, &[])),
+                    "y" => Ok(self.call_runtime("runtime_input_mouse_y", &[], LType::I64, &[])),
+                    "clicked" => Ok(self.call_runtime("runtime_input_mouse_clicked", &[], LType::Bool, &[])),
+                    _ => {
+                        let null = self.context.ptr_type(inkwell::AddressSpace::default()).const_null();
+                        Ok(Some(null.into()))
+                    }
+                };
+            }
+
             // Regular object property read
             if let Some(var) = self.lookup_var(&var_name) {
                 let handle_ty = self.type_to_llvm_basic(&var.ty);
@@ -2531,7 +2687,21 @@ impl<'ctx> Codegen<'ctx> {
             }
         }
 
-        let mut cmd = Command::new("cc");
+        let target_os = std::env::consts::OS;
+
+        // On Windows use link.exe (MSVC) or gcc (MinGW); elsewhere use cc
+        let linker = if target_os == "windows" {
+            // Prefer MinGW gcc if available, otherwise fall back to cc
+            if Command::new("gcc").arg("--version").output().is_ok() {
+                "gcc"
+            } else {
+                "cc"
+            }
+        } else {
+            "cc"
+        };
+
+        let mut cmd = Command::new(linker);
         cmd.arg(&obj_path_str)
             .arg("-o")
             .arg(output_path);
@@ -2540,20 +2710,55 @@ impl<'ctx> Codegen<'ctx> {
             cmd.arg(runtime_lib.to_str().unwrap());
 
             if let Some(ref sdl2_dir) = sdl2_lib_dir {
-                cmd.arg(format!("-L{}", sdl2_dir.display()))
-                    .arg(format!("-Wl,-rpath,{}", sdl2_dir.display()))
-                    .arg("-lSDL2")
-                    .arg("-framework").arg("Cocoa")
-                    .arg("-framework").arg("IOKit")
-                    .arg("-framework").arg("CoreVideo")
-                    .arg("-framework").arg("CoreAudio")
-                    .arg("-framework").arg("AudioToolbox")
-                    .arg("-framework").arg("Carbon")
-                    .arg("-framework").arg("ForceFeedback")
-                    .arg("-framework").arg("GameController")
-                    .arg("-framework").arg("CoreHaptics")
-                    .arg("-framework").arg("Metal")
-                    .arg("-liconv");
+                cmd.arg(format!("-L{}", sdl2_dir.display()));
+
+                match target_os {
+                    "macos" => {
+                        cmd.arg(format!("-Wl,-rpath,{}", sdl2_dir.display()))
+                            .arg("-lSDL2")
+                            .arg("-framework").arg("Cocoa")
+                            .arg("-framework").arg("IOKit")
+                            .arg("-framework").arg("CoreVideo")
+                            .arg("-framework").arg("CoreAudio")
+                            .arg("-framework").arg("AudioToolbox")
+                            .arg("-framework").arg("Carbon")
+                            .arg("-framework").arg("ForceFeedback")
+                            .arg("-framework").arg("GameController")
+                            .arg("-framework").arg("CoreHaptics")
+                            .arg("-framework").arg("Metal")
+                            .arg("-liconv");
+                    }
+                    "linux" => {
+                        cmd.arg(format!("-Wl,-rpath,{}", sdl2_dir.display()))
+                            .arg("-lSDL2")
+                            .arg("-lm")
+                            .arg("-ldl")
+                            .arg("-lpthread");
+                    }
+                    "windows" => {
+                        // MinGW / MSYS2 SDL2 linking
+                        cmd.arg("-lSDL2")
+                            .arg("-lSDL2main")
+                            .arg("-mwindows")
+                            .arg("-lm")
+                            .arg("-ldinput8")
+                            .arg("-ldxguid")
+                            .arg("-ldxerr8")
+                            .arg("-luser32")
+                            .arg("-lgdi32")
+                            .arg("-lwinmm")
+                            .arg("-limm32")
+                            .arg("-lole32")
+                            .arg("-loleaut32")
+                            .arg("-lshell32")
+                            .arg("-lsetupapi")
+                            .arg("-lversion")
+                            .arg("-luuid");
+                    }
+                    _ => {
+                        cmd.arg("-lSDL2").arg("-lm");
+                    }
+                }
             }
         }
 

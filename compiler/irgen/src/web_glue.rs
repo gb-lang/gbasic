@@ -57,6 +57,7 @@ pub fn js_runtime_function_names() -> Vec<&'static str> {
         "runtime_input_key_pressed",
         "runtime_input_mouse_x",
         "runtime_input_mouse_y",
+        "runtime_input_mouse_clicked",
         "runtime_input_poll",
         // Math
         "runtime_math_sin",
@@ -167,6 +168,7 @@ const state = {
   keys: new Set(),
   mouseX: 0,
   mouseY: 0,
+  mouseClicked: false,
   memory: null,
   memoryMap: new Map(),
   objects: [],
@@ -273,6 +275,8 @@ function ensureCanvas() {
       state.mouseX = e.clientX - r.left;
       state.mouseY = e.clientY - r.top;
     });
+    state.canvas.addEventListener("mousedown", () => { state.mouseClicked = true; });
+    state.canvas.addEventListener("mouseup", () => { state.mouseClicked = false; });
   }
 }
 
@@ -426,6 +430,7 @@ function buildImports(memory) {
       runtime_input_key_pressed(ptr) { return B(state.keys.has(readCStr(ptr))); },
       runtime_input_mouse_x() { return I(state.mouseX); },
       runtime_input_mouse_y() { return I(state.mouseY); },
+      runtime_input_mouse_clicked() { return B(state.mouseClicked); },
       runtime_input_poll() { },
 
       // Math (f64 in/out, no BigInt needed)

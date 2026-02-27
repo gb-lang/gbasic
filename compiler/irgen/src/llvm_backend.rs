@@ -1457,20 +1457,35 @@ impl<'ctx> Codegen<'ctx> {
             // ── Sound shortcuts ───────────────────────────────────────────────
             if namespace == NamespaceRef::Sound {
                 match method_name {
-                    // effect("name") — intermediate segment; store name for play()
-                    "effect" if !call.args.is_empty() => {
-                        // The next call should be play() — emit play directly with the name arg
-                        if i + 1 < chain.len() && chain[i + 1].method.name == "play" {
+                    // effect("name") or effect() followed by play("name")
+                    "effect" => {
+                        if !call.args.is_empty() {
+                            // effect("name") — has inline arg
+                            if i + 1 < chain.len() && chain[i + 1].method.name == "play" {
+                                let name_val = self.codegen_expression(&call.args[0])?.unwrap();
+                                self.call_runtime("runtime_sound_effect_play", &[LType::Ptr], LType::Void, &[name_val.into()]);
+                                last_result = None;
+                                pending_print_arg = None;
+                                i += 2;
+                                continue;
+                            }
                             let name_val = self.codegen_expression(&call.args[0])?.unwrap();
+                            last_result = self.call_runtime("runtime_sound_effect_load", &[LType::Ptr], LType::I64, &[name_val.into()]);
+                            pending_print_arg = None;
+                            i += 1;
+                            continue;
+                        }
+                        // effect() with no args — desugared from play("name") shortcut
+                        // Next segment play("name") has the actual arg
+                        if i + 1 < chain.len() && chain[i + 1].method.name == "play" && !chain[i + 1].args.is_empty() {
+                            let name_val = self.codegen_expression(&chain[i + 1].args[0])?.unwrap();
                             self.call_runtime("runtime_sound_effect_play", &[LType::Ptr], LType::Void, &[name_val.into()]);
                             last_result = None;
                             pending_print_arg = None;
-                            i += 2; // consume both effect and play
+                            i += 2;
                             continue;
                         }
-                        // effect() without play() — load the effect
-                        let name_val = self.codegen_expression(&call.args[0])?.unwrap();
-                        last_result = self.call_runtime("runtime_sound_effect_load", &[LType::Ptr], LType::I64, &[name_val.into()]);
+                        // effect() standalone — no-op
                         pending_print_arg = None;
                         i += 1;
                         continue;

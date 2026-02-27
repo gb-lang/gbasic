@@ -215,6 +215,31 @@ impl Parser {
                     if let Token::Ident(name) = self.current().clone() {
                         let field_span = self.current_span();
                         self.advance();
+                        // If expr is a MethodChain and next token is '(', append to chain
+                        if let Expression::MethodChain { base, mut chain, span: mc_span } = expr {
+                            if self.current() == &Token::LParen {
+                                self.advance();
+                                let args = self.parse_arg_list()?;
+                                let end = self.expect(&Token::RParen)?;
+                                let span = mc_span.merge(end);
+                                chain.push(MethodCall {
+                                    method: Identifier { name, span: field_span },
+                                    args,
+                                    span: field_span.merge(end),
+                                });
+                                expr = Expression::MethodChain { base, chain, span };
+                                continue;
+                            }
+                            // Property access on MethodChain (no parens) — also append
+                            let span = mc_span.merge(field_span);
+                            chain.push(MethodCall {
+                                method: Identifier { name, span: field_span },
+                                args: vec![],
+                                span: field_span,
+                            });
+                            expr = Expression::MethodChain { base, chain, span };
+                            continue;
+                        }
                         let span = expr.span().merge(field_span);
                         expr = Expression::FieldAccess {
                             object: Box::new(expr),

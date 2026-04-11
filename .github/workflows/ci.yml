@@ -49,9 +49,9 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo apt-get install -y libsdl2-dev binaryen lld
 
-      - name: Install SDL2 and Binaryen (macOS)
+      - name: Install SDL2, Binaryen, and zstd (macOS)
         if: runner.os == 'macOS'
-        run: brew install sdl2 binaryen
+        run: brew install sdl2 binaryen zstd
 
       - name: Set LLVM_SYS_180_PREFIX and PATH (Ubuntu)
         if: runner.os == 'Linux'
@@ -59,11 +59,12 @@ jobs:
           echo "LLVM_SYS_180_PREFIX=/usr/lib/llvm-18" >> "$GITHUB_ENV"
           echo "/usr/lib/llvm-18/bin" >> "$GITHUB_PATH"
 
-      - name: Set LLVM_SYS_180_PREFIX and PATH (macOS)
+      - name: Set LLVM_SYS_180_PREFIX, PATH, and LIBRARY_PATH (macOS)
         if: runner.os == 'macOS'
         run: |
           echo "LLVM_SYS_180_PREFIX=$(brew --prefix llvm@18)" >> "$GITHUB_ENV"
           echo "$(brew --prefix llvm@18)/bin" >> "$GITHUB_PATH"
+          echo "LIBRARY_PATH=$(brew --prefix zstd)/lib:$(brew --prefix llvm@18)/lib" >> "$GITHUB_ENV"
 
       - name: Build runtime library
         run: cargo build -p gbasic-runtime-desktop

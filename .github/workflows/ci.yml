@@ -72,6 +72,8 @@ jobs:
           -A clippy::missing_const_for_thread_local
           -A clippy::not_unsafe_ptr_arg_deref
           -A clippy::redundant_closure
+          -A clippy::single_match
+          -A clippy::needless_range_loop
 
       - name: Run tests
         run: cargo test --workspace

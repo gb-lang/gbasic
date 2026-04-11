@@ -34,6 +34,7 @@ pub fn js_runtime_function_names() -> Vec<&'static str> {
         "runtime_print_float_part",
         "runtime_print_newline",
         "runtime_string_concat",
+        "runtime_string_eq",
         "runtime_int_to_str",
         "runtime_float_to_str",
         // Screen
@@ -72,10 +73,13 @@ pub fn js_runtime_function_names() -> Vec<&'static str> {
         "runtime_math_random",
         "runtime_math_pi",
         "runtime_math_random_range",
+        "runtime_math_clamp",
         // System
         "runtime_system_time",
         "runtime_system_sleep",
         "runtime_system_exit",
+        "runtime_system_wait",
+        "runtime_system_log",
         "runtime_system_frame_begin",
         "runtime_system_frame_end",
         "runtime_system_frame_time",
@@ -394,6 +398,7 @@ function buildImports(memory) {
       runtime_print_float_part(v) { state.printBuffer += v.toString(); },
       runtime_print_newline() { appendOutput(state.printBuffer + "\n"); state.printBuffer = ""; },
       runtime_string_concat(a, b) { return writeCStr(readCStr(a) + readCStr(b)); },
+      runtime_string_eq(a, b) { return B(readCStr(a) === readCStr(b)); },
       runtime_int_to_str(v) { return writeCStr(N(v).toString()); },
       runtime_float_to_str(v) { return writeCStr(v.toString()); },
 
@@ -446,10 +451,13 @@ function buildImports(memory) {
       runtime_math_random() { return Math.random(); },
       runtime_math_pi() { return Math.PI; },
       runtime_math_random_range(min, max) { const lo = N(min), hi = N(max); return I(lo + Math.floor(Math.random() * (hi - lo + 1))); },
+      runtime_math_clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); },
 
       // System
       runtime_system_time() { return performance.now() / 1000.0; },
       runtime_system_sleep(_ms) { },
+      runtime_system_wait(secs) { },
+      runtime_system_log(ptr) { console.log("[log]", readCStr(ptr)); },
       runtime_system_exit(_code) { },
       runtime_system_frame_begin() { state.frameStart = performance.now(); },
       runtime_system_frame_end() { state.frameDt = performance.now() - state.frameStart; },

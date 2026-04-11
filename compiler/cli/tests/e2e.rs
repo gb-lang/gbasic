@@ -186,3 +186,67 @@ fn test_for_to_range() {
     .unwrap();
     assert_eq!(out, "1\n2\n3");
 }
+
+#[test]
+fn test_string_match_equality() {
+    let out = compile_and_run(r#"
+let s = "hello"
+match s {
+    "hello" -> { print("found") }
+    _ -> { print("nope") }
+}
+"#).unwrap();
+    assert_eq!(out, "found");
+}
+
+#[test]
+fn test_string_eq_operator() {
+    let out = compile_and_run(r#"
+if "abc" == "abc" {
+    print("equal")
+} else {
+    print("not equal")
+}
+"#).unwrap();
+    assert_eq!(out, "equal");
+}
+
+#[test]
+fn test_string_neq_operator() {
+    let out = compile_and_run(r#"
+if "abc" == "xyz" {
+    print("equal")
+} else {
+    print("not equal")
+}
+"#).unwrap();
+    assert_eq!(out, "not equal");
+}
+
+#[test]
+fn test_print_int_at_compiles() {
+    compile_only("print(42).at(100, 100)").unwrap();
+}
+
+#[test]
+fn test_point_standalone() {
+    compile_only("let p = point(100, 200)").unwrap();
+}
+
+#[test]
+fn test_point_position_assign() {
+    compile_only(r#"
+let obj = rect(50, 50)
+obj.position = point(100, 200)
+"#).unwrap();
+}
+
+#[test]
+fn test_line_with_points() {
+    compile_only("line(point(0, 0), point(100, 100))").unwrap();
+}
+
+#[test]
+fn test_layer_index() {
+    compile_only("Screen.Layer(2).Rect(10, 10)").unwrap();
+}

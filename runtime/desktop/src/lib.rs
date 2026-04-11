@@ -708,6 +708,13 @@ pub extern "C" fn runtime_string_concat(
     c.into_raw() as *const _
 }
 
+#[unsafe(no_mangle)]
+pub extern "C" fn runtime_string_eq(a: *const std::ffi::c_char, b: *const std::ffi::c_char) -> i64 {
+    let sa = unsafe { read_cstr(a) }.unwrap_or("");
+    let sb = unsafe { read_cstr(b) }.unwrap_or("");
+    if sa == sb { 1 } else { 0 }
+}
+
 // ─── Legacy functions (kept for backward compat) ───
 
 #[unsafe(no_mangle)]

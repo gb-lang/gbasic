@@ -876,7 +876,10 @@ impl<'ctx> Codegen<'ctx> {
         let idx_alloca = self.builder.build_alloca(i64_type, "idx").unwrap();
         self.builder.build_store(idx_alloca, i64_type.const_int(0, false)).unwrap();
         let var_alloca = self.builder.build_alloca(i64_type, &variable.name).unwrap();
+        // Track pre-body array length to detect removals
+        let pre_body_len_alloca = self.builder.build_alloca(i64_type, "pre_body_len").unwrap();
 
+        let function = self.current_function.unwrap();
         let (cond_bb, body_bb, inc_bb, exit_bb) = self.make_loop_blocks();
 
         self.builder.build_unconditional_branch(cond_bb).unwrap();
@@ -893,16 +896,33 @@ impl<'ctx> Codegen<'ctx> {
         let idx_val = self.builder.build_load(i64_type, idx_alloca, "idx").unwrap().into_int_value();
         let elem_val = self.call_runtime("runtime_array_get", &[LType::I64, LType::I64], LType::I64, &[arr_handle.into(), idx_val.into()]).unwrap();
         self.builder.build_store(var_alloca, elem_val).unwrap();
+        // Save pre-body length to detect element removal
+        let pre_len = self.call_runtime("runtime_array_length", &[LType::I64], LType::I64, &[arr_handle.into()]).unwrap();
+        self.builder.build_store(pre_body_len_alloca, pre_len).unwrap();
 
         self.codegen_loop_body(&variable.name, var_alloca, Type::Int, body, inc_bb, exit_bb)?;
 
+        // In inc_bb: conditionally increment — if array shrank, element shifted into
+        // current index, so skip increment to avoid skipping the shifted element
         self.builder.position_at_end(inc_bb);
-        let next_idx = self.builder.build_int_add(
-            self.builder.build_load(i64_type, idx_alloca, "idx").unwrap().into_int_value(),
-            i64_type.const_int(1, false),
-            "inc"
+        let old_len = self.builder.build_load(i64_type, pre_body_len_alloca, "old_len").unwrap().into_int_value();
+        let new_len = self.call_runtime("runtime_array_length", &[LType::I64], LType::I64, &[arr_handle.into()]).unwrap().into_int_value();
+        let shrank = self.builder.build_int_compare(
+            inkwell::IntPredicate::SLT, new_len, old_len, "shrank"
         ).unwrap();
+        let do_inc_bb = self.context.append_basic_block(function, "do_inc");
+        let skip_inc_bb = self.context.append_basic_block(function, "skip_inc");
+        self.builder.build_conditional_branch(shrank, skip_inc_bb, do_inc_bb).unwrap();
+
+        // Normal increment path
+        self.builder.position_at_end(do_inc_bb);
+        let cur_idx = self.builder.build_load(i64_type, idx_alloca, "idx").unwrap().into_int_value();
+        let next_idx = self.builder.build_int_add(cur_idx, i64_type.const_int(1, false), "inc").unwrap();
         self.builder.build_store(idx_alloca, next_idx).unwrap();
+        self.builder.build_unconditional_branch(cond_bb).unwrap();
+
+        // Skip increment path (element was removed, next element shifted into current index)
+        self.builder.position_at_end(skip_inc_bb);
         self.builder.build_unconditional_branch(cond_bb).unwrap();
 
         self.builder.position_at_end(exit_bb);
@@ -1018,9 +1038,18 @@ impl<'ctx> Codegen<'ctx> {
                 ).unwrap())
             }
             _ => {
-                // For strings/unknown, compare as ints (pointer equality — MVP)
+                // String/unknown comparison via runtime (content equality, not pointer)
+                let result = self.call_runtime(
+                    "runtime_string_eq",
+                    &[LType::Ptr, LType::Ptr],
+                    LType::I64,
+                    &[lv.into(), rv.into()],
+                ).unwrap().into_int_value();
                 Ok(self.builder.build_int_compare(
-                    inkwell::IntPredicate::EQ, lv.into_int_value(), rv.into_int_value(), "eq"
+                    inkwell::IntPredicate::NE,
+                    result,
+                    self.context.i64_type().const_int(0, false),
+                    "eq"
                 ).unwrap())
             }
         }
@@ -1084,6 +1113,15 @@ impl<'ctx> Codegen<'ctx> {
                             rv.into_int_value(), self.context.f64_type(), "itof"
                         ).unwrap();
                         self.codegen_float_binop(lv.into_float_value(), op, rf)
+                    }
+                    // String equality/inequality via runtime content comparison
+                    (Type::String, _) | (_, Type::String) if matches!(op, BinaryOp::Eq | BinaryOp::Neq) => {
+                        let eq_result = self.build_equality_check(lv, rv, &Type::String)?;
+                        match op {
+                            BinaryOp::Eq => Ok(eq_result.into()),
+                            BinaryOp::Neq => Ok(self.builder.build_not(eq_result, "neq").unwrap().into()),
+                            _ => unreachable!(),
+                        }
                     }
                     (Type::Int, _) | (Type::Bool, _) => {
                         self.codegen_int_binop(lv.into_int_value(), op, rv.into_int_value())
@@ -1298,6 +1336,8 @@ impl<'ctx> Codegen<'ctx> {
         let mut last_screen_pos: Option<String> = None;
         // Track whether the last call was a print (for .at() chaining)
         let mut pending_print_arg: Option<Expression> = None;
+        // Track pending layer index from Screen.Layer(n)
+        let mut pending_layer: Option<BasicValueEnum<'ctx>> = None;
 
         let mut i = 0;
         while i < chain.len() {
@@ -1342,10 +1382,43 @@ impl<'ctx> Codegen<'ctx> {
                         i += 1;
                         continue;
                     }
-                    // Layer(n) — shortcut desugaring prefix; just skip, layer index ignored for now
+                    // Layer(n) — evaluate and store layer index for subsequent object creation
                     "layer" => {
                         self.call_runtime("ensure_screen_init", &[], LType::Void, &[]);
+                        if !call.args.is_empty() {
+                            let layer_val = self.codegen_expression(&call.args[0])?.unwrap();
+                            let layer_i = self.coerce_to_ltype(layer_val, &self.infer_expr_type(&call.args[0]), LType::I64)?;
+                            pending_layer = Some(layer_i);
+                        }
                         last_screen_pos = None;
+                        pending_print_arg = None;
+                        i += 1;
+                        continue;
+                    }
+                    // rect(w, h) — object creation in Screen chain (e.g. Screen.Layer(n).Rect(w, h))
+                    "rect" if call.args.len() == 2 => {
+                        let w = self.codegen_expression(&call.args[0])?.unwrap();
+                        let h = self.codegen_expression(&call.args[1])?.unwrap();
+                        let wf = self.coerce_to_ltype(w, &self.infer_expr_type(&call.args[0]), LType::F64)?;
+                        let hf = self.coerce_to_ltype(h, &self.infer_expr_type(&call.args[1]), LType::F64)?;
+                        let handle = self.call_runtime("runtime_create_rect", &[LType::F64, LType::F64], LType::I64, &[wf.into(), hf.into()]);
+                        if let (Some(h_val), Some(layer_val)) = (handle, pending_layer.take()) {
+                            self.call_runtime("runtime_set_layer", &[LType::I64, LType::I64], LType::Void, &[h_val.into(), layer_val.into()]);
+                        }
+                        last_result = handle;
+                        pending_print_arg = None;
+                        i += 1;
+                        continue;
+                    }
+                    // circle(r) — object creation in Screen chain
+                    "circle" if call.args.len() == 1 => {
+                        let r = self.codegen_expression(&call.args[0])?.unwrap();
+                        let rf = self.coerce_to_ltype(r, &self.infer_expr_type(&call.args[0]), LType::F64)?;
+                        let handle = self.call_runtime("runtime_create_circle", &[LType::F64], LType::I64, &[rf.into()]);
+                        if let (Some(h_val), Some(layer_val)) = (handle, pending_layer.take()) {
+                            self.call_runtime("runtime_set_layer", &[LType::I64, LType::I64], LType::Void, &[h_val.into(), layer_val.into()]);
+                        }
+                        last_result = handle;
                         pending_print_arg = None;
                         i += 1;
                         continue;
@@ -1409,7 +1482,27 @@ impl<'ctx> Codegen<'ctx> {
                         i += 1;
                         continue;
                     }
-                    // line(from_x, from_y, to_x, to_y, r, g, b) — Screen.Layer(0).Line(...)
+                    // line(point1, point2) — 2 Point args, unpack packed i64 values
+                    "line" if call.args.len() == 2 => {
+                        self.call_runtime("ensure_screen_init", &[], LType::Void, &[]);
+                        let i64_type = self.context.i64_type();
+                        let p1 = self.codegen_expression(&call.args[0])?.unwrap().into_int_value();
+                        let p2 = self.codegen_expression(&call.args[1])?.unwrap().into_int_value();
+                        // Unpack: lower 32 bits = x, upper 32 bits = y
+                        let mask32 = i64_type.const_int(0xFFFF_FFFF, false);
+                        let x1 = self.builder.build_and(p1, mask32, "x1").unwrap();
+                        let y1 = self.builder.build_right_shift(p1, i64_type.const_int(32, false), false, "y1").unwrap();
+                        let x2 = self.builder.build_and(p2, mask32, "x2").unwrap();
+                        let y2 = self.builder.build_right_shift(p2, i64_type.const_int(32, false), false, "y2").unwrap();
+                        let white = i64_type.const_int(255, false);
+                        self.call_runtime("runtime_screen_draw_line", &[LType::I64, LType::I64, LType::I64, LType::I64, LType::I64, LType::I64, LType::I64], LType::Void,
+                            &[x1.into(), y1.into(), x2.into(), y2.into(), white.into(), white.into(), white.into()]);
+                        last_result = None;
+                        pending_print_arg = None;
+                        i += 1;
+                        continue;
+                    }
+                    // line(x1, y1, x2, y2) — 4 scalar args, default white color
                     "line" if call.args.len() == 4 => {
                         self.call_runtime("ensure_screen_init", &[], LType::Void, &[]);
                         let x1 = self.codegen_expression(&call.args[0])?.unwrap();
@@ -1423,6 +1516,30 @@ impl<'ctx> Codegen<'ctx> {
                         let y2i = self.coerce_to_ltype(y2, &self.infer_expr_type(&call.args[3]), LType::I64)?;
                         self.call_runtime("runtime_screen_draw_line", &[LType::I64, LType::I64, LType::I64, LType::I64, LType::I64, LType::I64, LType::I64], LType::Void,
                             &[x1i.into(), y1i.into(), x2i.into(), y2i.into(), white.into(), white.into(), white.into()]);
+                        last_result = None;
+                        pending_print_arg = None;
+                        i += 1;
+                        continue;
+                    }
+                    // line(x1, y1, x2, y2, r, g, b) — 7 scalar args with explicit color
+                    "line" if call.args.len() == 7 => {
+                        self.call_runtime("ensure_screen_init", &[], LType::Void, &[]);
+                        let x1 = self.codegen_expression(&call.args[0])?.unwrap();
+                        let y1 = self.codegen_expression(&call.args[1])?.unwrap();
+                        let x2 = self.codegen_expression(&call.args[2])?.unwrap();
+                        let y2 = self.codegen_expression(&call.args[3])?.unwrap();
+                        let r = self.codegen_expression(&call.args[4])?.unwrap();
+                        let g = self.codegen_expression(&call.args[5])?.unwrap();
+                        let b = self.codegen_expression(&call.args[6])?.unwrap();
+                        let x1i = self.coerce_to_ltype(x1, &self.infer_expr_type(&call.args[0]), LType::I64)?;
+                        let y1i = self.coerce_to_ltype(y1, &self.infer_expr_type(&call.args[1]), LType::I64)?;
+                        let x2i = self.coerce_to_ltype(x2, &self.infer_expr_type(&call.args[2]), LType::I64)?;
+                        let y2i = self.coerce_to_ltype(y2, &self.infer_expr_type(&call.args[3]), LType::I64)?;
+                        let ri = self.coerce_to_ltype(r, &self.infer_expr_type(&call.args[4]), LType::I64)?;
+                        let gi = self.coerce_to_ltype(g, &self.infer_expr_type(&call.args[5]), LType::I64)?;
+                        let bi = self.coerce_to_ltype(b, &self.infer_expr_type(&call.args[6]), LType::I64)?;
+                        self.call_runtime("runtime_screen_draw_line", &[LType::I64, LType::I64, LType::I64, LType::I64, LType::I64, LType::I64, LType::I64], LType::Void,
+                            &[x1i.into(), y1i.into(), x2i.into(), y2i.into(), ri.into(), gi.into(), bi.into()]);
                         last_result = None;
                         pending_print_arg = None;
                         i += 1;
@@ -1595,10 +1712,19 @@ impl<'ctx> Codegen<'ctx> {
                     return Ok(self.call_runtime("runtime_create_circle", &[LType::F64], LType::I64, &[rf.into()]));
                 }
                 "point" if args.len() == 2 => {
-                    // Point(x, y) constructor — only meaningful in property assignment context
+                    // Point(x, y) constructor — pack both into i64: y in upper 32 bits, x in lower 32
                     let x = self.codegen_expression(&args[0])?.unwrap();
-                    let _y = self.codegen_expression(&args[1])?.unwrap();
-                    return Ok(Some(x));
+                    let y = self.codegen_expression(&args[1])?.unwrap();
+                    let i64_type = self.context.i64_type();
+                    let xi = self.coerce_to_ltype(x, &self.infer_expr_type(&args[0]), LType::I64)?;
+                    let yi = self.coerce_to_ltype(y, &self.infer_expr_type(&args[1]), LType::I64)?;
+                    let xi64 = xi.into_int_value();
+                    let yi64 = yi.into_int_value();
+                    // Mask x to lower 32 bits, shift y to upper 32 bits
+                    let x_masked = self.builder.build_and(xi64, i64_type.const_int(0xFFFF_FFFF, false), "x_lo").unwrap();
+                    let y_shifted = self.builder.build_left_shift(yi64, i64_type.const_int(32, false), "y_hi").unwrap();
+                    let packed = self.builder.build_or(x_masked, y_shifted, "point_packed").unwrap();
+                    return Ok(Some(packed.into()));
                 }
                 _ => {}
             }
@@ -1724,10 +1850,26 @@ impl<'ctx> Codegen<'ctx> {
             let val = self.codegen_expression(text_arg)?;
             match self.infer_expr_type(text_arg) {
                 Type::String | Type::Unknown => val.unwrap(),
+                Type::Int => {
+                    let v = val.unwrap();
+                    self.call_runtime("runtime_int_to_str", &[LType::I64], LType::Ptr, &[v.into()])
+                        .unwrap_or_else(|| {
+                            self.builder.build_global_string_ptr("?", "fallback").unwrap().as_pointer_value().into()
+                        })
+                }
+                Type::Float => {
+                    let v = val.unwrap();
+                    self.call_runtime("runtime_float_to_str", &[LType::F64], LType::Ptr, &[v.into()])
+                        .unwrap_or_else(|| {
+                            self.builder.build_global_string_ptr("?", "fallback").unwrap().as_pointer_value().into()
+                        })
+                }
+                Type::Bool => {
+                    let global = self.builder.build_global_string_ptr("?", "fallback").unwrap();
+                    global.as_pointer_value().into()
+                }
                 _ => {
-                    // Convert to string representation — for MVP just print int/float to stdout
-                    // and return empty string for screen
-                    let global = self.builder.build_global_string_ptr("", "empty").unwrap();
+                    let global = self.builder.build_global_string_ptr("?", "fallback").unwrap();
                     global.as_pointer_value().into()
                 }
             }

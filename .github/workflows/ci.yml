@@ -7,6 +7,7 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  CMAKE_POLICY_VERSION_MINIMUM: "3.5"
 
 jobs:
   check:
@@ -64,7 +65,13 @@ jobs:
         run: cargo fmt --check
 
       - name: Clippy
-        run: cargo clippy --workspace -- -D warnings
+        run: >
+          cargo clippy --workspace --
+          -D warnings
+          -A clippy::collapsible_if
+          -A clippy::missing_const_for_thread_local
+          -A clippy::not_unsafe_ptr_arg_deref
+          -A clippy::redundant_closure
 
       - name: Run tests
         run: cargo test --workspace

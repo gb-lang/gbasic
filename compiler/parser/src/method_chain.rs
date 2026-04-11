@@ -58,7 +58,10 @@ impl Parser {
                         .collect()
                 };
                 chain.push(MethodCall {
-                    method: Identifier { name: method_name.to_ascii_lowercase(), span },
+                    method: Identifier {
+                        name: method_name.to_ascii_lowercase(),
+                        span,
+                    },
                     args: seg_args,
                     span,
                 });
@@ -66,7 +69,10 @@ impl Parser {
                 // Plain method name — last segment gets user args, others get none
                 let seg_args = if is_last { args.clone() } else { Vec::new() };
                 chain.push(MethodCall {
-                    method: Identifier { name: seg.to_ascii_lowercase(), span },
+                    method: Identifier {
+                        name: seg.to_ascii_lowercase(),
+                        span,
+                    },
                     args: seg_args,
                     span,
                 });
@@ -116,9 +122,7 @@ impl Parser {
         // Expect at least one .Method(args) call
         if !matches!(self.current(), Token::Dot) {
             return Err(GBasicError::SyntaxError {
-                message: format!(
-                    "{base} must be followed by a method call, e.g. {base}.Layer(1)",
-                ),
+                message: format!("{base} must be followed by a method call, e.g. {base}.Layer(1)",),
                 span: self.current_span(),
             });
         }
@@ -138,11 +142,7 @@ impl Parser {
             };
 
             let span = method.span.merge(end);
-            chain.push(MethodCall {
-                method,
-                args,
-                span,
-            });
+            chain.push(MethodCall { method, args, span });
         }
 
         let end_span = chain.last().map(|c| c.span).unwrap_or(start);

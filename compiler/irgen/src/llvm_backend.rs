@@ -3,6 +3,7 @@ use gbasic_common::ast::*;
 use gbasic_common::error::GBasicError;
 use gbasic_common::span::Span;
 use gbasic_common::types::Type;
+use inkwell::OptimizationLevel;
 use inkwell::basic_block::BasicBlock;
 use inkwell::builder::Builder;
 use inkwell::context::Context;
@@ -12,7 +13,6 @@ use inkwell::targets::{
 };
 use inkwell::types::{BasicMetadataTypeEnum, BasicType};
 use inkwell::values::{BasicMetadataValueEnum, BasicValueEnum, FunctionValue, PointerValue};
-use inkwell::OptimizationLevel;
 use std::collections::HashMap;
 use std::path::Path;
 use std::process::Command;
@@ -133,14 +133,23 @@ fn get_namespace_method(namespace: NamespaceRef, method: &str) -> Option<MethodE
         (IO, "printinteger") => "runtime_print_int".to_string(),
         _ => {
             let ns = match namespace {
-                Screen => "screen", Sound => "sound", Input => "input",
-                Math => "math", System => "system", Memory => "memory", IO => "io",
+                Screen => "screen",
+                Sound => "sound",
+                Input => "input",
+                Math => "math",
+                System => "system",
+                Memory => "memory",
+                IO => "io",
                 Asset => "asset",
             };
             format!("runtime_{ns}_{}", method_to_snake(method))
         }
     };
-    Some(MethodEntry { params, ret, runtime_name })
+    Some(MethodEntry {
+        params,
+        ret,
+        runtime_name,
+    })
 }
 
 /// Variable info: alloca pointer + type
@@ -172,19 +181,24 @@ fn named_color(name: &str) -> Option<(u8, u8, u8)> {
 /// E.g. `paddle.position.x` → ("paddle", "position.x")
 fn resolve_field_chain(expr: &Expression) -> Option<(String, String)> {
     match expr {
-        Expression::FieldAccess { object, field, .. } => {
-            match object.as_ref() {
-                Expression::Identifier(id) => Some((id.name.clone(), field.name.clone())),
-                Expression::FieldAccess { object: inner_obj, field: inner_field, .. } => {
-                    if let Expression::Identifier(id) = inner_obj.as_ref() {
-                        Some((id.name.clone(), format!("{}.{}", inner_field.name, field.name)))
-                    } else {
-                        None
-                    }
+        Expression::FieldAccess { object, field, .. } => match object.as_ref() {
+            Expression::Identifier(id) => Some((id.name.clone(), field.name.clone())),
+            Expression::FieldAccess {
+                object: inner_obj,
+                field: inner_field,
+                ..
+            } => {
+                if let Expression::Identifier(id) = inner_obj.as_ref() {
+                    Some((
+                        id.name.clone(),
+                        format!("{}.{}", inner_field.name, field.name),
+                    ))
+                } else {
+                    None
                 }
-                _ => None,
             }
-        }
+            _ => None,
+        },
         _ => None,
     }
 }
@@ -199,8 +213,12 @@ fn find_tool(name: &str) -> String {
         }
     }
     // Common brew locations
-    for prefix in &["/opt/homebrew/opt/llvm@18/bin", "/usr/local/opt/llvm@18/bin",
-                    "/opt/homebrew/bin", "/usr/local/bin"] {
+    for prefix in &[
+        "/opt/homebrew/opt/llvm@18/bin",
+        "/usr/local/opt/llvm@18/bin",
+        "/opt/homebrew/bin",
+        "/usr/local/bin",
+    ] {
         let p = format!("{prefix}/{name}");
         if Path::new(&p).exists() {
             return p;
@@ -237,7 +255,11 @@ impl<'ctx> Codegen<'ctx> {
     }
 
     fn needs_terminator(&self) -> bool {
-        self.builder.get_insert_block().unwrap().get_terminator().is_none()
+        self.builder
+            .get_insert_block()
+            .unwrap()
+            .get_terminator()
+            .is_none()
     }
 
     /// Ensure an integer value is i1 for use as a branch condition.
@@ -247,7 +269,9 @@ impl<'ctx> Codegen<'ctx> {
             val
         } else {
             let zero = val.get_type().const_int(0, false);
-            self.builder.build_int_compare(inkwell::IntPredicate::NE, val, zero, "tobool").unwrap()
+            self.builder
+                .build_int_compare(inkwell::IntPredicate::NE, val, zero, "tobool")
+                .unwrap()
         }
     }
 
@@ -285,13 +309,17 @@ impl<'ctx> Codegen<'ctx> {
         let function = if let Some(f) = self.module.get_function(name) {
             f
         } else {
-            let params: Vec<BasicMetadataTypeEnum> = param_types.iter().map(|t| self.ltype_to_meta(*t)).collect();
+            let params: Vec<BasicMetadataTypeEnum> =
+                param_types.iter().map(|t| self.ltype_to_meta(*t)).collect();
             let fn_type = match ret {
                 LType::Void => self.context.void_type().fn_type(&params, false),
                 LType::I64 => self.context.i64_type().fn_type(&params, false),
                 LType::F64 => self.context.f64_type().fn_type(&params, false),
                 LType::Bool => self.context.i64_type().fn_type(&params, false),
-                LType::Ptr => self.context.ptr_type(inkwell::AddressSpace::default()).fn_type(&params, false),
+                LType::Ptr => self
+                    .context
+                    .ptr_type(inkwell::AddressSpace::default())
+                    .fn_type(&params, false),
             };
             self.module.add_function(name, fn_type, None)
         };
@@ -325,20 +353,25 @@ impl<'ctx> Codegen<'ctx> {
 
         // No-newline variants for string interpolation
         let part_str_ty = void_type.fn_type(&[i8_ptr_type.into()], false);
-        self.module.add_function("runtime_print_str_part", part_str_ty, None);
+        self.module
+            .add_function("runtime_print_str_part", part_str_ty, None);
 
         let part_int_ty = void_type.fn_type(&[i64_type.into()], false);
-        self.module.add_function("runtime_print_int_part", part_int_ty, None);
+        self.module
+            .add_function("runtime_print_int_part", part_int_ty, None);
 
         let part_float_ty = void_type.fn_type(&[f64_type.into()], false);
-        self.module.add_function("runtime_print_float_part", part_float_ty, None);
+        self.module
+            .add_function("runtime_print_float_part", part_float_ty, None);
 
         let newline_ty = void_type.fn_type(&[], false);
-        self.module.add_function("runtime_print_newline", newline_ty, None);
+        self.module
+            .add_function("runtime_print_newline", newline_ty, None);
 
         // runtime_string_concat(a: *const i8, b: *const i8) -> *const i8
         let concat_ty = i8_ptr_type.fn_type(&[i8_ptr_type.into(), i8_ptr_type.into()], false);
-        self.module.add_function("runtime_string_concat", concat_ty, None);
+        self.module
+            .add_function("runtime_string_concat", concat_ty, None);
     }
 
     pub fn compile(
@@ -358,11 +391,16 @@ impl<'ctx> Codegen<'ctx> {
             let wasm_target = Target::from_triple(&triple).unwrap();
             let wasm_machine = wasm_target
                 .create_target_machine(
-                    &triple, "generic", "", OptimizationLevel::Default,
-                    RelocMode::PIC, CodeModel::Default,
+                    &triple,
+                    "generic",
+                    "",
+                    OptimizationLevel::Default,
+                    RelocMode::PIC,
+                    CodeModel::Default,
                 )
                 .unwrap();
-            cg.module.set_data_layout(&wasm_machine.get_target_data().get_data_layout());
+            cg.module
+                .set_data_layout(&wasm_machine.get_target_data().get_data_layout());
         }
 
         cg.declare_runtime_functions();
@@ -419,11 +457,10 @@ impl<'ctx> Codegen<'ctx> {
         }
 
         // Verify
-        cg.module
-            .verify()
-            .map_err(|e| GBasicError::CodegenError {
-                span: None, message: format!("LLVM verification failed: {}", e.to_string()),
-            })?;
+        cg.module.verify().map_err(|e| GBasicError::CodegenError {
+            span: None,
+            message: format!("LLVM verification failed: {}", e.to_string()),
+        })?;
 
         if dump_ir {
             cg.module.print_to_stderr();
@@ -459,12 +496,13 @@ impl<'ctx> Codegen<'ctx> {
     }
 
     fn codegen_function_body(&mut self, func: &FunctionDecl) -> Result<(), GBasicError> {
-        let function = self
-            .module
-            .get_function(&func.name.name)
-            .ok_or_else(|| GBasicError::CodegenError {
-                span: None, message: format!("function '{}' not declared", func.name.name),
-            })?;
+        let function =
+            self.module
+                .get_function(&func.name.name)
+                .ok_or_else(|| GBasicError::CodegenError {
+                    span: None,
+                    message: format!("function '{}' not declared", func.name.name),
+                })?;
 
         // Save current state
         let prev_fn = self.current_function;
@@ -481,10 +519,7 @@ impl<'ctx> Codegen<'ctx> {
             let ty = param.type_ann.clone().unwrap_or(Type::Unknown);
             let alloca = self.build_alloca_for_type(&ty, &param.name.name);
             self.builder.build_store(alloca, param_val).unwrap();
-            self.insert_var(
-                param.name.name.clone(),
-                VarInfo { ptr: alloca, ty },
-            );
+            self.insert_var(param.name.name.clone(), VarInfo { ptr: alloca, ty });
         }
 
         let stmts = &func.body.statements;
@@ -494,7 +529,11 @@ impl<'ctx> Codegen<'ctx> {
         let last_is_expr = matches!(stmts.last(), Some(Statement::Expression { .. }))
             && !matches!(ret_type, Type::Void);
 
-        let count = if last_is_expr { stmts.len() - 1 } else { stmts.len() };
+        let count = if last_is_expr {
+            stmts.len() - 1
+        } else {
+            stmts.len()
+        };
         for stmt in &stmts[..count] {
             self.codegen_statement(stmt)?;
         }
@@ -587,7 +626,10 @@ impl<'ctx> Codegen<'ctx> {
                 else_block,
                 ..
             } => {
-                let cond_raw = self.codegen_expression(condition)?.unwrap().into_int_value();
+                let cond_raw = self
+                    .codegen_expression(condition)?
+                    .unwrap()
+                    .into_int_value();
                 let cond = self.ensure_i1(cond_raw);
                 let function = self.current_function.unwrap();
                 let then_bb = self.context.append_basic_block(function, "then");
@@ -630,7 +672,10 @@ impl<'ctx> Codegen<'ctx> {
                 // Detect `while true` at top-level for implicit frame management
                 let is_while_true = matches!(
                     condition,
-                    Expression::Literal(Literal { kind: LiteralKind::Bool(true), .. })
+                    Expression::Literal(Literal {
+                        kind: LiteralKind::Bool(true),
+                        ..
+                    })
                 );
                 let auto_frame = is_while_true && !self.in_auto_frame;
 
@@ -647,7 +692,10 @@ impl<'ctx> Codegen<'ctx> {
 
                 self.builder.build_unconditional_branch(cond_bb).unwrap();
                 self.builder.position_at_end(cond_bb);
-                let cond_raw = self.codegen_expression(condition)?.unwrap().into_int_value();
+                let cond_raw = self
+                    .codegen_expression(condition)?
+                    .unwrap()
+                    .into_int_value();
                 let cond = self.ensure_i1(cond_raw);
                 self.builder
                     .build_conditional_branch(cond, body_bb, exit_bb)
@@ -693,9 +741,7 @@ impl<'ctx> Codegen<'ctx> {
             } => {
                 self.codegen_for_loop(variable, iterable, body)?;
             }
-            Statement::Match {
-                subject, arms, ..
-            } => {
+            Statement::Match { subject, arms, .. } => {
                 self.codegen_match(subject, arms)?;
             }
             Statement::Break { .. } => {
@@ -708,7 +754,9 @@ impl<'ctx> Codegen<'ctx> {
             Statement::Continue { .. } => {
                 if let Some(&(continue_bb, _)) = self.loop_exit_stack.last() {
                     if self.needs_terminator() {
-                        self.builder.build_unconditional_branch(continue_bb).unwrap();
+                        self.builder
+                            .build_unconditional_branch(continue_bb)
+                            .unwrap();
                     }
                 }
             }
@@ -727,7 +775,14 @@ impl<'ctx> Codegen<'ctx> {
     }
 
     /// Create the 4 basic blocks for a for-loop: cond, body, inc, exit.
-    fn make_loop_blocks(&self) -> (BasicBlock<'ctx>, BasicBlock<'ctx>, BasicBlock<'ctx>, BasicBlock<'ctx>) {
+    fn make_loop_blocks(
+        &self,
+    ) -> (
+        BasicBlock<'ctx>,
+        BasicBlock<'ctx>,
+        BasicBlock<'ctx>,
+        BasicBlock<'ctx>,
+    ) {
         let function = self.current_function.unwrap();
         (
             self.context.append_basic_block(function, "for_cond"),
@@ -748,7 +803,13 @@ impl<'ctx> Codegen<'ctx> {
         exit_bb: BasicBlock<'ctx>,
     ) -> Result<(), GBasicError> {
         self.push_scope();
-        self.insert_var(var_name.to_string(), VarInfo { ptr: var_alloca, ty: var_ty });
+        self.insert_var(
+            var_name.to_string(),
+            VarInfo {
+                ptr: var_alloca,
+                ty: var_ty,
+            },
+        );
         self.loop_exit_stack.push((inc_bb, exit_bb));
         for s in &body.statements {
             self.codegen_statement(s)?;
@@ -781,21 +842,34 @@ impl<'ctx> Codegen<'ctx> {
 
             self.builder.build_unconditional_branch(cond_bb).unwrap();
             self.builder.position_at_end(cond_bb);
-            let current = self.builder.build_load(i64_type, var_alloca, "i").unwrap().into_int_value();
-            let cond = self.builder.build_int_compare(
-                inkwell::IntPredicate::SLT, current, end_val, "for_cond"
-            ).unwrap();
-            self.builder.build_conditional_branch(cond, body_bb, exit_bb).unwrap();
+            let current = self
+                .builder
+                .build_load(i64_type, var_alloca, "i")
+                .unwrap()
+                .into_int_value();
+            let cond = self
+                .builder
+                .build_int_compare(inkwell::IntPredicate::SLT, current, end_val, "for_cond")
+                .unwrap();
+            self.builder
+                .build_conditional_branch(cond, body_bb, exit_bb)
+                .unwrap();
 
             self.builder.position_at_end(body_bb);
             self.codegen_loop_body(&variable.name, var_alloca, Type::Int, body, inc_bb, exit_bb)?;
 
             self.builder.position_at_end(inc_bb);
-            let next = self.builder.build_int_add(
-                self.builder.build_load(i64_type, var_alloca, "i").unwrap().into_int_value(),
-                i64_type.const_int(1, false),
-                "inc"
-            ).unwrap();
+            let next = self
+                .builder
+                .build_int_add(
+                    self.builder
+                        .build_load(i64_type, var_alloca, "i")
+                        .unwrap()
+                        .into_int_value(),
+                    i64_type.const_int(1, false),
+                    "inc",
+                )
+                .unwrap();
             self.builder.build_store(var_alloca, next).unwrap();
             self.builder.build_unconditional_branch(cond_bb).unwrap();
 
@@ -819,49 +893,88 @@ impl<'ctx> Codegen<'ctx> {
             for (i, elem) in elements.iter().enumerate() {
                 let val = self.codegen_expression(elem)?.unwrap();
                 let gep = unsafe {
-                    self.builder.build_gep(
-                        array_ty, array_alloca,
-                        &[i64_type.const_int(0, false), i64_type.const_int(i as u64, false)],
-                        "elem_ptr",
-                    ).unwrap()
+                    self.builder
+                        .build_gep(
+                            array_ty,
+                            array_alloca,
+                            &[
+                                i64_type.const_int(0, false),
+                                i64_type.const_int(i as u64, false),
+                            ],
+                            "elem_ptr",
+                        )
+                        .unwrap()
                 };
                 self.builder.build_store(gep, val).unwrap();
             }
 
             let idx_alloca = self.builder.build_alloca(i64_type, "idx").unwrap();
-            self.builder.build_store(idx_alloca, i64_type.const_int(0, false)).unwrap();
-            let var_alloca = self.builder.build_alloca(llvm_elem_ty, &variable.name).unwrap();
+            self.builder
+                .build_store(idx_alloca, i64_type.const_int(0, false))
+                .unwrap();
+            let var_alloca = self
+                .builder
+                .build_alloca(llvm_elem_ty, &variable.name)
+                .unwrap();
 
             let (cond_bb, body_bb, inc_bb, exit_bb) = self.make_loop_blocks();
 
             self.builder.build_unconditional_branch(cond_bb).unwrap();
             self.builder.position_at_end(cond_bb);
-            let idx = self.builder.build_load(i64_type, idx_alloca, "idx").unwrap().into_int_value();
-            let cond = self.builder.build_int_compare(
-                inkwell::IntPredicate::SLT, idx, i64_type.const_int(len, false), "for_cond"
-            ).unwrap();
-            self.builder.build_conditional_branch(cond, body_bb, exit_bb).unwrap();
+            let idx = self
+                .builder
+                .build_load(i64_type, idx_alloca, "idx")
+                .unwrap()
+                .into_int_value();
+            let cond = self
+                .builder
+                .build_int_compare(
+                    inkwell::IntPredicate::SLT,
+                    idx,
+                    i64_type.const_int(len, false),
+                    "for_cond",
+                )
+                .unwrap();
+            self.builder
+                .build_conditional_branch(cond, body_bb, exit_bb)
+                .unwrap();
 
             self.builder.position_at_end(body_bb);
-            let idx_val = self.builder.build_load(i64_type, idx_alloca, "idx").unwrap().into_int_value();
+            let idx_val = self
+                .builder
+                .build_load(i64_type, idx_alloca, "idx")
+                .unwrap()
+                .into_int_value();
             let elem_ptr = unsafe {
-                self.builder.build_gep(
-                    array_ty, array_alloca,
-                    &[i64_type.const_int(0, false), idx_val],
-                    "elem_ptr",
-                ).unwrap()
+                self.builder
+                    .build_gep(
+                        array_ty,
+                        array_alloca,
+                        &[i64_type.const_int(0, false), idx_val],
+                        "elem_ptr",
+                    )
+                    .unwrap()
             };
-            let elem_val = self.builder.build_load(llvm_elem_ty, elem_ptr, "elem").unwrap();
+            let elem_val = self
+                .builder
+                .build_load(llvm_elem_ty, elem_ptr, "elem")
+                .unwrap();
             self.builder.build_store(var_alloca, elem_val).unwrap();
 
             self.codegen_loop_body(&variable.name, var_alloca, elem_ty, body, inc_bb, exit_bb)?;
 
             self.builder.position_at_end(inc_bb);
-            let next_idx = self.builder.build_int_add(
-                self.builder.build_load(i64_type, idx_alloca, "idx").unwrap().into_int_value(),
-                i64_type.const_int(1, false),
-                "inc"
-            ).unwrap();
+            let next_idx = self
+                .builder
+                .build_int_add(
+                    self.builder
+                        .build_load(i64_type, idx_alloca, "idx")
+                        .unwrap()
+                        .into_int_value(),
+                    i64_type.const_int(1, false),
+                    "inc",
+                )
+                .unwrap();
             self.builder.build_store(idx_alloca, next_idx).unwrap();
             self.builder.build_unconditional_branch(cond_bb).unwrap();
 
@@ -871,38 +984,125 @@ impl<'ctx> Codegen<'ctx> {
 
         // Dynamic array iteration: codegen iterable as a handle, iterate with index counter
         let arr_handle = self.codegen_expression(iterable)?.unwrap();
-        let _len = self.call_runtime("runtime_array_length", &[LType::I64], LType::I64, &[arr_handle.into()]).unwrap().into_int_value();
+        let _len = self
+            .call_runtime(
+                "runtime_array_length",
+                &[LType::I64],
+                LType::I64,
+                &[arr_handle.into()],
+            )
+            .unwrap()
+            .into_int_value();
 
         let idx_alloca = self.builder.build_alloca(i64_type, "idx").unwrap();
-        self.builder.build_store(idx_alloca, i64_type.const_int(0, false)).unwrap();
+        self.builder
+            .build_store(idx_alloca, i64_type.const_int(0, false))
+            .unwrap();
         let var_alloca = self.builder.build_alloca(i64_type, &variable.name).unwrap();
+        // Track pre-body array length to detect removals
+        let pre_body_len_alloca = self.builder.build_alloca(i64_type, "pre_body_len").unwrap();
 
+        let function = self.current_function.unwrap();
         let (cond_bb, body_bb, inc_bb, exit_bb) = self.make_loop_blocks();
 
         self.builder.build_unconditional_branch(cond_bb).unwrap();
         self.builder.position_at_end(cond_bb);
-        let idx = self.builder.build_load(i64_type, idx_alloca, "idx").unwrap().into_int_value();
+        let idx = self
+            .builder
+            .build_load(i64_type, idx_alloca, "idx")
+            .unwrap()
+            .into_int_value();
         // Re-read length each iteration (array may change during loop)
-        let cur_len = self.call_runtime("runtime_array_length", &[LType::I64], LType::I64, &[arr_handle.into()]).unwrap().into_int_value();
-        let cond = self.builder.build_int_compare(
-            inkwell::IntPredicate::SLT, idx, cur_len, "for_cond"
-        ).unwrap();
-        self.builder.build_conditional_branch(cond, body_bb, exit_bb).unwrap();
+        let cur_len = self
+            .call_runtime(
+                "runtime_array_length",
+                &[LType::I64],
+                LType::I64,
+                &[arr_handle.into()],
+            )
+            .unwrap()
+            .into_int_value();
+        let cond = self
+            .builder
+            .build_int_compare(inkwell::IntPredicate::SLT, idx, cur_len, "for_cond")
+            .unwrap();
+        self.builder
+            .build_conditional_branch(cond, body_bb, exit_bb)
+            .unwrap();
 
         self.builder.position_at_end(body_bb);
-        let idx_val = self.builder.build_load(i64_type, idx_alloca, "idx").unwrap().into_int_value();
-        let elem_val = self.call_runtime("runtime_array_get", &[LType::I64, LType::I64], LType::I64, &[arr_handle.into(), idx_val.into()]).unwrap();
+        let idx_val = self
+            .builder
+            .build_load(i64_type, idx_alloca, "idx")
+            .unwrap()
+            .into_int_value();
+        let elem_val = self
+            .call_runtime(
+                "runtime_array_get",
+                &[LType::I64, LType::I64],
+                LType::I64,
+                &[arr_handle.into(), idx_val.into()],
+            )
+            .unwrap();
         self.builder.build_store(var_alloca, elem_val).unwrap();
+        // Save pre-body length to detect element removal
+        let pre_len = self
+            .call_runtime(
+                "runtime_array_length",
+                &[LType::I64],
+                LType::I64,
+                &[arr_handle.into()],
+            )
+            .unwrap();
+        self.builder
+            .build_store(pre_body_len_alloca, pre_len)
+            .unwrap();
 
         self.codegen_loop_body(&variable.name, var_alloca, Type::Int, body, inc_bb, exit_bb)?;
 
+        // In inc_bb: conditionally increment — if array shrank, element shifted into
+        // current index, so skip increment to avoid skipping the shifted element
         self.builder.position_at_end(inc_bb);
-        let next_idx = self.builder.build_int_add(
-            self.builder.build_load(i64_type, idx_alloca, "idx").unwrap().into_int_value(),
-            i64_type.const_int(1, false),
-            "inc"
-        ).unwrap();
+        let old_len = self
+            .builder
+            .build_load(i64_type, pre_body_len_alloca, "old_len")
+            .unwrap()
+            .into_int_value();
+        let new_len = self
+            .call_runtime(
+                "runtime_array_length",
+                &[LType::I64],
+                LType::I64,
+                &[arr_handle.into()],
+            )
+            .unwrap()
+            .into_int_value();
+        let shrank = self
+            .builder
+            .build_int_compare(inkwell::IntPredicate::SLT, new_len, old_len, "shrank")
+            .unwrap();
+        let do_inc_bb = self.context.append_basic_block(function, "do_inc");
+        let skip_inc_bb = self.context.append_basic_block(function, "skip_inc");
+        self.builder
+            .build_conditional_branch(shrank, skip_inc_bb, do_inc_bb)
+            .unwrap();
+
+        // Normal increment path
+        self.builder.position_at_end(do_inc_bb);
+        let cur_idx = self
+            .builder
+            .build_load(i64_type, idx_alloca, "idx")
+            .unwrap()
+            .into_int_value();
+        let next_idx = self
+            .builder
+            .build_int_add(cur_idx, i64_type.const_int(1, false), "inc")
+            .unwrap();
         self.builder.build_store(idx_alloca, next_idx).unwrap();
+        self.builder.build_unconditional_branch(cond_bb).unwrap();
+
+        // Skip increment path (element was removed, next element shifted into current index)
+        self.builder.position_at_end(skip_inc_bb);
         self.builder.build_unconditional_branch(cond_bb).unwrap();
 
         self.builder.position_at_end(exit_bb);
@@ -936,10 +1136,16 @@ impl<'ctx> Codegen<'ctx> {
                     let pat_val = self.codegen_literal(lit)?;
                     let cond = self.build_equality_check(subject_val, pat_val, &subject_ty)?;
 
-                    let arm_bb = self.context.append_basic_block(function, &format!("match_arm_{i}"));
-                    let next_bb = self.context.append_basic_block(function, &format!("match_next_{i}"));
+                    let arm_bb = self
+                        .context
+                        .append_basic_block(function, &format!("match_arm_{i}"));
+                    let next_bb = self
+                        .context
+                        .append_basic_block(function, &format!("match_next_{i}"));
 
-                    self.builder.build_conditional_branch(cond, arm_bb, next_bb).unwrap();
+                    self.builder
+                        .build_conditional_branch(cond, arm_bb, next_bb)
+                        .unwrap();
 
                     self.builder.position_at_end(arm_bb);
                     self.push_scope();
@@ -955,8 +1161,12 @@ impl<'ctx> Codegen<'ctx> {
                 }
                 Pattern::Identifier(id) => {
                     // Bind the subject value to the identifier name, then execute body
-                    let arm_bb = self.context.append_basic_block(function, &format!("match_arm_{i}"));
-                    let next_bb = self.context.append_basic_block(function, &format!("match_next_{i}"));
+                    let arm_bb = self
+                        .context
+                        .append_basic_block(function, &format!("match_arm_{i}"));
+                    let next_bb = self
+                        .context
+                        .append_basic_block(function, &format!("match_next_{i}"));
 
                     // Identifier patterns always match (like a wildcard but with binding)
                     self.builder.build_unconditional_branch(arm_bb).unwrap();
@@ -965,7 +1175,13 @@ impl<'ctx> Codegen<'ctx> {
                     self.push_scope();
                     let alloca = self.build_alloca_for_type(&subject_ty, &id.name);
                     self.builder.build_store(alloca, subject_val).unwrap();
-                    self.insert_var(id.name.clone(), VarInfo { ptr: alloca, ty: subject_ty.clone() });
+                    self.insert_var(
+                        id.name.clone(),
+                        VarInfo {
+                            ptr: alloca,
+                            ty: subject_ty.clone(),
+                        },
+                    );
                     for s in &arm.body.statements {
                         self.codegen_statement(s)?;
                     }
@@ -992,7 +1208,11 @@ impl<'ctx> Codegen<'ctx> {
         match &lit.kind {
             LiteralKind::Int(v) => Ok(self.context.i64_type().const_int(*v as u64, true).into()),
             LiteralKind::Float(v) => Ok(self.context.f64_type().const_float(*v).into()),
-            LiteralKind::Bool(v) => Ok(self.context.bool_type().const_int(if *v { 1 } else { 0 }, false).into()),
+            LiteralKind::Bool(v) => Ok(self
+                .context
+                .bool_type()
+                .const_int(if *v { 1 } else { 0 }, false)
+                .into()),
             LiteralKind::String(s) => {
                 let global = self.builder.build_global_string_ptr(s, "str").unwrap();
                 Ok(global.as_pointer_value().into())
@@ -1007,21 +1227,44 @@ impl<'ctx> Codegen<'ctx> {
         ty: &Type,
     ) -> Result<inkwell::values::IntValue<'ctx>, GBasicError> {
         match ty {
-            Type::Int | Type::Bool => {
-                Ok(self.builder.build_int_compare(
-                    inkwell::IntPredicate::EQ, lv.into_int_value(), rv.into_int_value(), "eq"
-                ).unwrap())
-            }
-            Type::Float => {
-                Ok(self.builder.build_float_compare(
-                    inkwell::FloatPredicate::OEQ, lv.into_float_value(), rv.into_float_value(), "eq"
-                ).unwrap())
-            }
+            Type::Int | Type::Bool => Ok(self
+                .builder
+                .build_int_compare(
+                    inkwell::IntPredicate::EQ,
+                    lv.into_int_value(),
+                    rv.into_int_value(),
+                    "eq",
+                )
+                .unwrap()),
+            Type::Float => Ok(self
+                .builder
+                .build_float_compare(
+                    inkwell::FloatPredicate::OEQ,
+                    lv.into_float_value(),
+                    rv.into_float_value(),
+                    "eq",
+                )
+                .unwrap()),
             _ => {
-                // For strings/unknown, compare as ints (pointer equality — MVP)
-                Ok(self.builder.build_int_compare(
-                    inkwell::IntPredicate::EQ, lv.into_int_value(), rv.into_int_value(), "eq"
-                ).unwrap())
+                // String/unknown comparison via runtime (content equality, not pointer)
+                let result = self
+                    .call_runtime(
+                        "runtime_string_eq",
+                        &[LType::Ptr, LType::Ptr],
+                        LType::I64,
+                        &[lv.into(), rv.into()],
+                    )
+                    .unwrap()
+                    .into_int_value();
+                Ok(self
+                    .builder
+                    .build_int_compare(
+                        inkwell::IntPredicate::NE,
+                        result,
+                        self.context.i64_type().const_int(0, false),
+                        "eq",
+                    )
+                    .unwrap())
             }
         }
     }
@@ -1037,21 +1280,27 @@ impl<'ctx> Codegen<'ctx> {
                 if let Some((r, g, b)) = named_color(&id.name) {
                     // Pack as i64: r << 16 | g << 8 | b
                     let packed = ((r as u64) << 16) | ((g as u64) << 8) | (b as u64);
-                    return Ok(Some(self.context.i64_type().const_int(packed, false).into()));
+                    return Ok(Some(
+                        self.context.i64_type().const_int(packed, false).into(),
+                    ));
                 }
 
-                let var = self.lookup_var(&id.name).ok_or_else(|| {
-                    GBasicError::CodegenError {
-                        span: Some(id.span), message: format!("undefined variable '{}'", id.name),
-                    }
-                })?;
+                let var = self
+                    .lookup_var(&id.name)
+                    .ok_or_else(|| GBasicError::CodegenError {
+                        span: Some(id.span),
+                        message: format!("undefined variable '{}'", id.name),
+                    })?;
                 let llvm_type = self.type_to_llvm_basic(&var.ty);
                 let ptr = var.ptr;
                 let val = self.builder.build_load(llvm_type, ptr, &id.name).unwrap();
                 Ok(Some(val))
             }
             Expression::BinaryOp {
-                left, op, right, span,
+                left,
+                op,
+                right,
+                span,
             } => {
                 // String concatenation via + operator
                 let left_ty = self.infer_expr_type(left);
@@ -1059,11 +1308,10 @@ impl<'ctx> Codegen<'ctx> {
                     let lv = self.codegen_expression(left)?.unwrap();
                     let rv = self.codegen_expression(right)?.unwrap();
                     let concat_fn = self.module.get_function("runtime_string_concat").unwrap();
-                    let result = self.builder.build_call(
-                        concat_fn,
-                        &[lv.into(), rv.into()],
-                        "concat"
-                    ).unwrap();
+                    let result = self
+                        .builder
+                        .build_call(concat_fn, &[lv.into(), rv.into()], "concat")
+                        .unwrap();
                     return Ok(result.try_as_basic_value().left());
                 }
 
@@ -1074,16 +1322,39 @@ impl<'ctx> Codegen<'ctx> {
                 let result = match (&left_ty, &right_ty) {
                     // Mixed Int/Float: promote Int side to Float
                     (Type::Int, Type::Float) => {
-                        let lf = self.builder.build_signed_int_to_float(
-                            lv.into_int_value(), self.context.f64_type(), "itof"
-                        ).unwrap();
+                        let lf = self
+                            .builder
+                            .build_signed_int_to_float(
+                                lv.into_int_value(),
+                                self.context.f64_type(),
+                                "itof",
+                            )
+                            .unwrap();
                         self.codegen_float_binop(lf, op, rv.into_float_value())
                     }
                     (Type::Float, Type::Int) => {
-                        let rf = self.builder.build_signed_int_to_float(
-                            rv.into_int_value(), self.context.f64_type(), "itof"
-                        ).unwrap();
+                        let rf = self
+                            .builder
+                            .build_signed_int_to_float(
+                                rv.into_int_value(),
+                                self.context.f64_type(),
+                                "itof",
+                            )
+                            .unwrap();
                         self.codegen_float_binop(lv.into_float_value(), op, rf)
+                    }
+                    // String equality/inequality via runtime content comparison
+                    (Type::String, _) | (_, Type::String)
+                        if matches!(op, BinaryOp::Eq | BinaryOp::Neq) =>
+                    {
+                        let eq_result = self.build_equality_check(lv, rv, &Type::String)?;
+                        match op {
+                            BinaryOp::Eq => Ok(eq_result.into()),
+                            BinaryOp::Neq => {
+                                Ok(self.builder.build_not(eq_result, "neq").unwrap().into())
+                            }
+                            _ => unreachable!(),
+                        }
                     }
                     (Type::Int, _) | (Type::Bool, _) => {
                         self.codegen_int_binop(lv.into_int_value(), op, rv.into_int_value())
@@ -1092,7 +1363,8 @@ impl<'ctx> Codegen<'ctx> {
                         self.codegen_float_binop(lv.into_float_value(), op, rv.into_float_value())
                     }
                     _ => Err(GBasicError::CodegenError {
-                        span: Some(*span), message: format!("unsupported binary op on {left_ty}"),
+                        span: Some(*span),
+                        message: format!("unsupported binary op on {left_ty}"),
                     }),
                 }?;
                 Ok(Some(result))
@@ -1115,7 +1387,8 @@ impl<'ctx> Codegen<'ctx> {
                                 .into(),
                         )),
                         _ => Err(GBasicError::CodegenError {
-                            span: None, message: "cannot negate non-numeric".into(),
+                            span: None,
+                            message: "cannot negate non-numeric".into(),
                         }),
                     },
                     UnaryOp::Not => Ok(Some(
@@ -1126,30 +1399,37 @@ impl<'ctx> Codegen<'ctx> {
                     )),
                 }
             }
-            Expression::Call { callee, args, .. } => {
-                self.codegen_call(callee, args)
-            }
-            Expression::Assignment { target, value, span } => {
+            Expression::Call { callee, args, .. } => self.codegen_call(callee, args),
+            Expression::Assignment {
+                target,
+                value,
+                span,
+            } => {
                 // Check if target is a field access (property setter)
                 if let Some((var_name, prop_path)) = resolve_field_chain(target) {
-                    let var = self.lookup_var(&var_name).ok_or_else(|| {
-                        GBasicError::CodegenError {
-                            span: Some(*span), message: format!("undefined variable '{var_name}'"),
-                        }
-                    })?;
+                    let var =
+                        self.lookup_var(&var_name)
+                            .ok_or_else(|| GBasicError::CodegenError {
+                                span: Some(*span),
+                                message: format!("undefined variable '{var_name}'"),
+                            })?;
                     let handle_ty = self.type_to_llvm_basic(&var.ty);
-                    let handle = self.builder.build_load(handle_ty, var.ptr, "handle").unwrap();
+                    let handle = self
+                        .builder
+                        .build_load(handle_ty, var.ptr, "handle")
+                        .unwrap();
 
                     return self.codegen_property_set(handle, &prop_path, value, *span);
                 }
 
                 let val = self.codegen_expression(value)?.unwrap();
                 if let Expression::Identifier(id) = target.as_ref() {
-                    let var = self.lookup_var(&id.name).ok_or_else(|| {
-                        GBasicError::CodegenError {
-                            span: Some(id.span), message: format!("undefined variable '{}'", id.name),
-                        }
-                    })?;
+                    let var =
+                        self.lookup_var(&id.name)
+                            .ok_or_else(|| GBasicError::CodegenError {
+                                span: Some(id.span),
+                                message: format!("undefined variable '{}'", id.name),
+                            })?;
                     let ptr = var.ptr;
                     self.builder.build_store(ptr, val).unwrap();
                 }
@@ -1162,24 +1442,17 @@ impl<'ctx> Codegen<'ctx> {
                 let empty = self.builder.build_global_string_ptr("", "empty").unwrap();
                 Ok(Some(empty.as_pointer_value().into()))
             }
-            Expression::MethodChain { base, chain, .. } => {
-                self.codegen_method_chain(*base, chain)
-            }
-            Expression::Array { elements, .. } => {
-                self.codegen_array(elements)
-            }
-            Expression::Index { object, index, .. } => {
-                self.codegen_index(object, index)
-            }
+            Expression::MethodChain { base, chain, .. } => self.codegen_method_chain(*base, chain),
+            Expression::Array { elements, .. } => self.codegen_array(elements),
+            Expression::Index { object, index, .. } => self.codegen_index(object, index),
             Expression::Range { .. } => {
                 // Range expressions are only valid as for-loop iterables, not standalone
                 Err(GBasicError::CodegenError {
-                    span: None, message: "range expressions can only be used in for-loop iterables".into(),
+                    span: None,
+                    message: "range expressions can only be used in for-loop iterables".into(),
                 })
             }
-            Expression::FieldAccess { .. } => {
-                self.codegen_field_access_read(expr)
-            }
+            Expression::FieldAccess { .. } => self.codegen_field_access_read(expr),
         }
     }
 
@@ -1202,15 +1475,17 @@ impl<'ctx> Codegen<'ctx> {
         for (i, elem) in elements.iter().enumerate() {
             let val = self.codegen_expression(elem)?.unwrap();
             let gep = unsafe {
-                self.builder.build_gep(
-                    array_ty,
-                    alloca,
-                    &[
-                        i64_type.const_int(0, false),
-                        i64_type.const_int(i as u64, false),
-                    ],
-                    "elem_ptr",
-                ).unwrap()
+                self.builder
+                    .build_gep(
+                        array_ty,
+                        alloca,
+                        &[
+                            i64_type.const_int(0, false),
+                            i64_type.const_int(i as u64, false),
+                        ],
+                        "elem_ptr",
+                    )
+                    .unwrap()
             };
             self.builder.build_store(gep, val).unwrap();
         }
@@ -1238,14 +1513,14 @@ impl<'ctx> Codegen<'ctx> {
         let ptr = obj_val.into_pointer_value();
 
         let gep = unsafe {
-            self.builder.build_gep(
-                llvm_elem_ty,
-                ptr,
-                &[idx_val],
-                "idx_ptr",
-            ).unwrap()
+            self.builder
+                .build_gep(llvm_elem_ty, ptr, &[idx_val], "idx_ptr")
+                .unwrap()
         };
-        let val = self.builder.build_load(llvm_elem_ty, gep, "idx_val").unwrap();
+        let val = self
+            .builder
+            .build_load(llvm_elem_ty, gep, "idx_val")
+            .unwrap();
         Ok(Some(val))
     }
 
@@ -1254,7 +1529,10 @@ impl<'ctx> Codegen<'ctx> {
             LType::I64 => self.context.i64_type().into(),
             LType::F64 => self.context.f64_type().into(),
             LType::Bool => self.context.i64_type().into(), // bool passed as i64 in ABI
-            LType::Ptr => self.context.ptr_type(inkwell::AddressSpace::default()).into(),
+            LType::Ptr => self
+                .context
+                .ptr_type(inkwell::AddressSpace::default())
+                .into(),
             LType::Void => unreachable!(),
         }
     }
@@ -1264,9 +1542,10 @@ impl<'ctx> Codegen<'ctx> {
         namespace: NamespaceRef,
         method: &str,
     ) -> Result<(FunctionValue<'ctx>, Vec<LType>, LType), GBasicError> {
-        let entry = get_namespace_method(namespace, method)
-            .ok_or_else(|| GBasicError::CodegenError {
-                span: None, message: format!("unknown namespace method: {namespace}.{method}"),
+        let entry =
+            get_namespace_method(namespace, method).ok_or_else(|| GBasicError::CodegenError {
+                span: None,
+                message: format!("unknown namespace method: {namespace}.{method}"),
             })?;
         let param_types = entry.params;
         let ret_type = entry.ret;
@@ -1275,13 +1554,17 @@ impl<'ctx> Codegen<'ctx> {
         let function = if let Some(f) = self.module.get_function(&fn_name) {
             f
         } else {
-            let params: Vec<BasicMetadataTypeEnum> = param_types.iter().map(|t| self.ltype_to_meta(*t)).collect();
+            let params: Vec<BasicMetadataTypeEnum> =
+                param_types.iter().map(|t| self.ltype_to_meta(*t)).collect();
             let fn_type = match ret_type {
                 LType::Void => self.context.void_type().fn_type(&params, false),
                 LType::I64 => self.context.i64_type().fn_type(&params, false),
                 LType::F64 => self.context.f64_type().fn_type(&params, false),
                 LType::Bool => self.context.i64_type().fn_type(&params, false),
-                LType::Ptr => self.context.ptr_type(inkwell::AddressSpace::default()).fn_type(&params, false),
+                LType::Ptr => self
+                    .context
+                    .ptr_type(inkwell::AddressSpace::default())
+                    .fn_type(&params, false),
             };
             self.module.add_function(&fn_name, fn_type, None)
         };
@@ -1298,6 +1581,8 @@ impl<'ctx> Codegen<'ctx> {
         let mut last_screen_pos: Option<String> = None;
         // Track whether the last call was a print (for .at() chaining)
         let mut pending_print_arg: Option<Expression> = None;
+        // Track pending layer index from Screen.Layer(n)
+        let mut pending_layer: Option<BasicValueEnum<'ctx>> = None;
 
         let mut i = 0;
         while i < chain.len() {
@@ -1311,7 +1596,8 @@ impl<'ctx> Codegen<'ctx> {
                     | "bottom_left" | "bottom_right" => {
                         self.call_runtime("ensure_screen_init", &[], LType::Void, &[]);
                         last_screen_pos = Some(method_name.to_string());
-                        last_result = self.call_runtime("runtime_screen_center_x", &[], LType::F64, &[]);
+                        last_result =
+                            self.call_runtime("runtime_screen_center_x", &[], LType::F64, &[]);
                         pending_print_arg = None;
                         i += 1;
                         continue;
@@ -1320,32 +1606,119 @@ impl<'ctx> Codegen<'ctx> {
                         let pos_name = last_screen_pos.as_deref().unwrap().to_string();
                         let f64_type = self.context.f64_type();
                         last_result = Some(match (pos_name.as_str(), method_name) {
-                            ("center", "x") | ("top_center", "x") | ("bottom_center", "x") =>
-                                self.call_runtime("runtime_screen_center_x", &[], LType::F64, &[]).unwrap(),
-                            ("center", "y") =>
-                                self.call_runtime("runtime_screen_center_y", &[], LType::F64, &[]).unwrap(),
-                            ("bottom_center", "y") | ("bottom_left", "y") | ("bottom_right", "y") => {
-                                let h = self.call_runtime("runtime_screen_height", &[], LType::I64, &[]).unwrap();
-                                self.builder.build_signed_int_to_float(h.into_int_value(), f64_type, "sh").unwrap().into()
+                            ("center", "x") | ("top_center", "x") | ("bottom_center", "x") => self
+                                .call_runtime("runtime_screen_center_x", &[], LType::F64, &[])
+                                .unwrap(),
+                            ("center", "y") => self
+                                .call_runtime("runtime_screen_center_y", &[], LType::F64, &[])
+                                .unwrap(),
+                            ("bottom_center", "y")
+                            | ("bottom_left", "y")
+                            | ("bottom_right", "y") => {
+                                let h = self
+                                    .call_runtime("runtime_screen_height", &[], LType::I64, &[])
+                                    .unwrap();
+                                self.builder
+                                    .build_signed_int_to_float(h.into_int_value(), f64_type, "sh")
+                                    .unwrap()
+                                    .into()
                             }
-                            ("top_left", "x") | ("top_left", "y") | ("top_center", "y")
+                            ("top_left", "x")
+                            | ("top_left", "y")
+                            | ("top_center", "y")
                             | ("bottom_left", "x") => f64_type.const_float(0.0).into(),
                             ("top_right", "x") | ("bottom_right", "x") => {
-                                let w = self.call_runtime("runtime_screen_width", &[], LType::I64, &[]).unwrap();
-                                self.builder.build_signed_int_to_float(w.into_int_value(), f64_type, "wf").unwrap().into()
+                                let w = self
+                                    .call_runtime("runtime_screen_width", &[], LType::I64, &[])
+                                    .unwrap();
+                                self.builder
+                                    .build_signed_int_to_float(w.into_int_value(), f64_type, "wf")
+                                    .unwrap()
+                                    .into()
                             }
                             ("top_right", "y") => f64_type.const_float(0.0).into(),
-                            _ => self.call_runtime("runtime_screen_center_x", &[], LType::F64, &[]).unwrap(),
+                            _ => self
+                                .call_runtime("runtime_screen_center_x", &[], LType::F64, &[])
+                                .unwrap(),
                         });
                         last_screen_pos = None;
                         pending_print_arg = None;
                         i += 1;
                         continue;
                     }
-                    // Layer(n) — shortcut desugaring prefix; just skip, layer index ignored for now
+                    // Layer(n) — evaluate and store layer index for subsequent object creation
                     "layer" => {
                         self.call_runtime("ensure_screen_init", &[], LType::Void, &[]);
+                        if !call.args.is_empty() {
+                            let layer_val = self.codegen_expression(&call.args[0])?.unwrap();
+                            let layer_i = self.coerce_to_ltype(
+                                layer_val,
+                                &self.infer_expr_type(&call.args[0]),
+                                LType::I64,
+                            )?;
+                            pending_layer = Some(layer_i);
+                        }
                         last_screen_pos = None;
+                        pending_print_arg = None;
+                        i += 1;
+                        continue;
+                    }
+                    // rect(w, h) — object creation in Screen chain (e.g. Screen.Layer(n).Rect(w, h))
+                    "rect" if call.args.len() == 2 => {
+                        let w = self.codegen_expression(&call.args[0])?.unwrap();
+                        let h = self.codegen_expression(&call.args[1])?.unwrap();
+                        let wf = self.coerce_to_ltype(
+                            w,
+                            &self.infer_expr_type(&call.args[0]),
+                            LType::F64,
+                        )?;
+                        let hf = self.coerce_to_ltype(
+                            h,
+                            &self.infer_expr_type(&call.args[1]),
+                            LType::F64,
+                        )?;
+                        let handle = self.call_runtime(
+                            "runtime_create_rect",
+                            &[LType::F64, LType::F64],
+                            LType::I64,
+                            &[wf.into(), hf.into()],
+                        );
+                        if let (Some(h_val), Some(layer_val)) = (handle, pending_layer.take()) {
+                            self.call_runtime(
+                                "runtime_set_layer",
+                                &[LType::I64, LType::I64],
+                                LType::Void,
+                                &[h_val.into(), layer_val.into()],
+                            );
+                        }
+                        last_result = handle;
+                        pending_print_arg = None;
+                        i += 1;
+                        continue;
+                    }
+                    // circle(r) — object creation in Screen chain
+                    "circle" if call.args.len() == 1 => {
+                        let r = self.codegen_expression(&call.args[0])?.unwrap();
+                        let rf = self.coerce_to_ltype(
+                            r,
+                            &self.infer_expr_type(&call.args[0]),
+                            LType::F64,
+                        )?;
+                        let handle = self.call_runtime(
+                            "runtime_create_circle",
+                            &[LType::F64],
+                            LType::I64,
+                            &[rf.into()],
+                        );
+                        if let (Some(h_val), Some(layer_val)) = (handle, pending_layer.take()) {
+                            self.call_runtime(
+                                "runtime_set_layer",
+                                &[LType::I64, LType::I64],
+                                LType::Void,
+                                &[h_val.into(), layer_val.into()],
+                            );
+                        }
+                        last_result = handle;
                         pending_print_arg = None;
                         i += 1;
                         continue;
@@ -1353,7 +1726,8 @@ impl<'ctx> Codegen<'ctx> {
                     // print(text) — shortcut desugared form of Screen.Layer(0).Print(text)
                     "print" if !call.args.is_empty() => {
                         // Check if the next method in chain is "at" — if so, draw on screen
-                        if i + 1 < chain.len() && chain[i + 1].method.name == "at"
+                        if i + 1 < chain.len()
+                            && chain[i + 1].method.name == "at"
                             && chain[i + 1].args.len() == 2
                         {
                             let text_arg = call.args[0].clone();
@@ -1388,28 +1762,110 @@ impl<'ctx> Codegen<'ctx> {
                             let val = self.codegen_expression(&call.args[0])?.unwrap();
                             let i64_type = self.context.i64_type();
                             let iv = val.into_int_value();
-                            let r = self.builder.build_right_shift(iv, i64_type.const_int(16, false), false, "r").unwrap();
-                            let g = self.builder.build_right_shift(iv, i64_type.const_int(8, false), false, "g").unwrap();
-                            let b = self.builder.build_and(iv, i64_type.const_int(0xFF, false), "b").unwrap();
-                            let r = self.builder.build_and(r, i64_type.const_int(0xFF, false), "r").unwrap();
-                            let g = self.builder.build_and(g, i64_type.const_int(0xFF, false), "g").unwrap();
-                            self.call_runtime("runtime_screen_clear", &[LType::I64, LType::I64, LType::I64], LType::Void, &[r.into(), g.into(), b.into()]);
+                            let r = self
+                                .builder
+                                .build_right_shift(iv, i64_type.const_int(16, false), false, "r")
+                                .unwrap();
+                            let g = self
+                                .builder
+                                .build_right_shift(iv, i64_type.const_int(8, false), false, "g")
+                                .unwrap();
+                            let b = self
+                                .builder
+                                .build_and(iv, i64_type.const_int(0xFF, false), "b")
+                                .unwrap();
+                            let r = self
+                                .builder
+                                .build_and(r, i64_type.const_int(0xFF, false), "r")
+                                .unwrap();
+                            let g = self
+                                .builder
+                                .build_and(g, i64_type.const_int(0xFF, false), "g")
+                                .unwrap();
+                            self.call_runtime(
+                                "runtime_screen_clear",
+                                &[LType::I64, LType::I64, LType::I64],
+                                LType::Void,
+                                &[r.into(), g.into(), b.into()],
+                            );
                         } else if call.args.len() == 3 {
                             let r = self.codegen_expression(&call.args[0])?.unwrap();
                             let g = self.codegen_expression(&call.args[1])?.unwrap();
                             let b = self.codegen_expression(&call.args[2])?.unwrap();
-                            self.call_runtime("runtime_screen_clear", &[LType::I64, LType::I64, LType::I64], LType::Void, &[r.into(), g.into(), b.into()]);
+                            self.call_runtime(
+                                "runtime_screen_clear",
+                                &[LType::I64, LType::I64, LType::I64],
+                                LType::Void,
+                                &[r.into(), g.into(), b.into()],
+                            );
                         } else {
                             // clear() with no args — clear to black
                             let zero = self.context.i64_type().const_int(0, false);
-                            self.call_runtime("runtime_screen_clear", &[LType::I64, LType::I64, LType::I64], LType::Void, &[zero.into(), zero.into(), zero.into()]);
+                            self.call_runtime(
+                                "runtime_screen_clear",
+                                &[LType::I64, LType::I64, LType::I64],
+                                LType::Void,
+                                &[zero.into(), zero.into(), zero.into()],
+                            );
                         }
                         last_result = None;
                         pending_print_arg = None;
                         i += 1;
                         continue;
                     }
-                    // line(from_x, from_y, to_x, to_y, r, g, b) — Screen.Layer(0).Line(...)
+                    // line(point1, point2) — 2 Point args, unpack packed i64 values
+                    "line" if call.args.len() == 2 => {
+                        self.call_runtime("ensure_screen_init", &[], LType::Void, &[]);
+                        let i64_type = self.context.i64_type();
+                        let p1 = self
+                            .codegen_expression(&call.args[0])?
+                            .unwrap()
+                            .into_int_value();
+                        let p2 = self
+                            .codegen_expression(&call.args[1])?
+                            .unwrap()
+                            .into_int_value();
+                        // Unpack: lower 32 bits = x, upper 32 bits = y
+                        let mask32 = i64_type.const_int(0xFFFF_FFFF, false);
+                        let x1 = self.builder.build_and(p1, mask32, "x1").unwrap();
+                        let y1 = self
+                            .builder
+                            .build_right_shift(p1, i64_type.const_int(32, false), false, "y1")
+                            .unwrap();
+                        let x2 = self.builder.build_and(p2, mask32, "x2").unwrap();
+                        let y2 = self
+                            .builder
+                            .build_right_shift(p2, i64_type.const_int(32, false), false, "y2")
+                            .unwrap();
+                        let white = i64_type.const_int(255, false);
+                        self.call_runtime(
+                            "runtime_screen_draw_line",
+                            &[
+                                LType::I64,
+                                LType::I64,
+                                LType::I64,
+                                LType::I64,
+                                LType::I64,
+                                LType::I64,
+                                LType::I64,
+                            ],
+                            LType::Void,
+                            &[
+                                x1.into(),
+                                y1.into(),
+                                x2.into(),
+                                y2.into(),
+                                white.into(),
+                                white.into(),
+                                white.into(),
+                            ],
+                        );
+                        last_result = None;
+                        pending_print_arg = None;
+                        i += 1;
+                        continue;
+                    }
+                    // line(x1, y1, x2, y2) — 4 scalar args, default white color
                     "line" if call.args.len() == 4 => {
                         self.call_runtime("ensure_screen_init", &[], LType::Void, &[]);
                         let x1 = self.codegen_expression(&call.args[0])?.unwrap();
@@ -1417,12 +1873,120 @@ impl<'ctx> Codegen<'ctx> {
                         let x2 = self.codegen_expression(&call.args[2])?.unwrap();
                         let y2 = self.codegen_expression(&call.args[3])?.unwrap();
                         let white = self.context.i64_type().const_int(255, false);
-                        let x1i = self.coerce_to_ltype(x1, &self.infer_expr_type(&call.args[0]), LType::I64)?;
-                        let y1i = self.coerce_to_ltype(y1, &self.infer_expr_type(&call.args[1]), LType::I64)?;
-                        let x2i = self.coerce_to_ltype(x2, &self.infer_expr_type(&call.args[2]), LType::I64)?;
-                        let y2i = self.coerce_to_ltype(y2, &self.infer_expr_type(&call.args[3]), LType::I64)?;
-                        self.call_runtime("runtime_screen_draw_line", &[LType::I64, LType::I64, LType::I64, LType::I64, LType::I64, LType::I64, LType::I64], LType::Void,
-                            &[x1i.into(), y1i.into(), x2i.into(), y2i.into(), white.into(), white.into(), white.into()]);
+                        let x1i = self.coerce_to_ltype(
+                            x1,
+                            &self.infer_expr_type(&call.args[0]),
+                            LType::I64,
+                        )?;
+                        let y1i = self.coerce_to_ltype(
+                            y1,
+                            &self.infer_expr_type(&call.args[1]),
+                            LType::I64,
+                        )?;
+                        let x2i = self.coerce_to_ltype(
+                            x2,
+                            &self.infer_expr_type(&call.args[2]),
+                            LType::I64,
+                        )?;
+                        let y2i = self.coerce_to_ltype(
+                            y2,
+                            &self.infer_expr_type(&call.args[3]),
+                            LType::I64,
+                        )?;
+                        self.call_runtime(
+                            "runtime_screen_draw_line",
+                            &[
+                                LType::I64,
+                                LType::I64,
+                                LType::I64,
+                                LType::I64,
+                                LType::I64,
+                                LType::I64,
+                                LType::I64,
+                            ],
+                            LType::Void,
+                            &[
+                                x1i.into(),
+                                y1i.into(),
+                                x2i.into(),
+                                y2i.into(),
+                                white.into(),
+                                white.into(),
+                                white.into(),
+                            ],
+                        );
+                        last_result = None;
+                        pending_print_arg = None;
+                        i += 1;
+                        continue;
+                    }
+                    // line(x1, y1, x2, y2, r, g, b) — 7 scalar args with explicit color
+                    "line" if call.args.len() == 7 => {
+                        self.call_runtime("ensure_screen_init", &[], LType::Void, &[]);
+                        let x1 = self.codegen_expression(&call.args[0])?.unwrap();
+                        let y1 = self.codegen_expression(&call.args[1])?.unwrap();
+                        let x2 = self.codegen_expression(&call.args[2])?.unwrap();
+                        let y2 = self.codegen_expression(&call.args[3])?.unwrap();
+                        let r = self.codegen_expression(&call.args[4])?.unwrap();
+                        let g = self.codegen_expression(&call.args[5])?.unwrap();
+                        let b = self.codegen_expression(&call.args[6])?.unwrap();
+                        let x1i = self.coerce_to_ltype(
+                            x1,
+                            &self.infer_expr_type(&call.args[0]),
+                            LType::I64,
+                        )?;
+                        let y1i = self.coerce_to_ltype(
+                            y1,
+                            &self.infer_expr_type(&call.args[1]),
+                            LType::I64,
+                        )?;
+                        let x2i = self.coerce_to_ltype(
+                            x2,
+                            &self.infer_expr_type(&call.args[2]),
+                            LType::I64,
+                        )?;
+                        let y2i = self.coerce_to_ltype(
+                            y2,
+                            &self.infer_expr_type(&call.args[3]),
+                            LType::I64,
+                        )?;
+                        let ri = self.coerce_to_ltype(
+                            r,
+                            &self.infer_expr_type(&call.args[4]),
+                            LType::I64,
+                        )?;
+                        let gi = self.coerce_to_ltype(
+                            g,
+                            &self.infer_expr_type(&call.args[5]),
+                            LType::I64,
+                        )?;
+                        let bi = self.coerce_to_ltype(
+                            b,
+                            &self.infer_expr_type(&call.args[6]),
+                            LType::I64,
+                        )?;
+                        self.call_runtime(
+                            "runtime_screen_draw_line",
+                            &[
+                                LType::I64,
+                                LType::I64,
+                                LType::I64,
+                                LType::I64,
+                                LType::I64,
+                                LType::I64,
+                                LType::I64,
+                            ],
+                            LType::Void,
+                            &[
+                                x1i.into(),
+                                y1i.into(),
+                                x2i.into(),
+                                y2i.into(),
+                                ri.into(),
+                                gi.into(),
+                                bi.into(),
+                            ],
+                        );
                         last_result = None;
                         pending_print_arg = None;
                         i += 1;
@@ -1445,7 +2009,12 @@ impl<'ctx> Codegen<'ctx> {
                     "key" if !call.args.is_empty() => {
                         self.call_runtime("ensure_screen_init", &[], LType::Void, &[]);
                         let key_val = self.codegen_expression(&call.args[0])?.unwrap();
-                        last_result = self.call_runtime("runtime_input_key_pressed", &[LType::Ptr], LType::Bool, &[key_val.into()]);
+                        last_result = self.call_runtime(
+                            "runtime_input_key_pressed",
+                            &[LType::Ptr],
+                            LType::Bool,
+                            &[key_val.into()],
+                        );
                         pending_print_arg = None;
                         i += 1;
                         continue;
@@ -1463,23 +2032,41 @@ impl<'ctx> Codegen<'ctx> {
                             // effect("name") — has inline arg
                             if i + 1 < chain.len() && chain[i + 1].method.name == "play" {
                                 let name_val = self.codegen_expression(&call.args[0])?.unwrap();
-                                self.call_runtime("runtime_sound_effect_play", &[LType::Ptr], LType::Void, &[name_val.into()]);
+                                self.call_runtime(
+                                    "runtime_sound_effect_play",
+                                    &[LType::Ptr],
+                                    LType::Void,
+                                    &[name_val.into()],
+                                );
                                 last_result = None;
                                 pending_print_arg = None;
                                 i += 2;
                                 continue;
                             }
                             let name_val = self.codegen_expression(&call.args[0])?.unwrap();
-                            last_result = self.call_runtime("runtime_sound_effect_load", &[LType::Ptr], LType::I64, &[name_val.into()]);
+                            last_result = self.call_runtime(
+                                "runtime_sound_effect_load",
+                                &[LType::Ptr],
+                                LType::I64,
+                                &[name_val.into()],
+                            );
                             pending_print_arg = None;
                             i += 1;
                             continue;
                         }
                         // effect() with no args — desugared from play("name") shortcut
                         // Next segment play("name") has the actual arg
-                        if i + 1 < chain.len() && chain[i + 1].method.name == "play" && !chain[i + 1].args.is_empty() {
+                        if i + 1 < chain.len()
+                            && chain[i + 1].method.name == "play"
+                            && !chain[i + 1].args.is_empty()
+                        {
                             let name_val = self.codegen_expression(&chain[i + 1].args[0])?.unwrap();
-                            self.call_runtime("runtime_sound_effect_play", &[LType::Ptr], LType::Void, &[name_val.into()]);
+                            self.call_runtime(
+                                "runtime_sound_effect_play",
+                                &[LType::Ptr],
+                                LType::Void,
+                                &[name_val.into()],
+                            );
                             last_result = None;
                             pending_print_arg = None;
                             i += 2;
@@ -1507,9 +2094,22 @@ impl<'ctx> Codegen<'ctx> {
                     "random" if call.args.len() == 2 => {
                         let min = self.codegen_expression(&call.args[0])?.unwrap();
                         let max = self.codegen_expression(&call.args[1])?.unwrap();
-                        let mini = self.coerce_to_ltype(min, &self.infer_expr_type(&call.args[0]), LType::I64)?;
-                        let maxi = self.coerce_to_ltype(max, &self.infer_expr_type(&call.args[1]), LType::I64)?;
-                        last_result = self.call_runtime("runtime_math_random_range", &[LType::I64, LType::I64], LType::I64, &[mini.into(), maxi.into()]);
+                        let mini = self.coerce_to_ltype(
+                            min,
+                            &self.infer_expr_type(&call.args[0]),
+                            LType::I64,
+                        )?;
+                        let maxi = self.coerce_to_ltype(
+                            max,
+                            &self.infer_expr_type(&call.args[1]),
+                            LType::I64,
+                        )?;
+                        last_result = self.call_runtime(
+                            "runtime_math_random_range",
+                            &[LType::I64, LType::I64],
+                            LType::I64,
+                            &[mini.into(), maxi.into()],
+                        );
                         pending_print_arg = None;
                         i += 1;
                         continue;
@@ -1519,20 +2119,35 @@ impl<'ctx> Codegen<'ctx> {
             }
 
             // ── Generic namespace dispatch ─────────────────────────────────────
-            let (function, param_types, ret_type) = self.get_or_declare_runtime_fn(namespace, method_name)?;
+            let (function, param_types, ret_type) =
+                self.get_or_declare_runtime_fn(namespace, method_name)?;
 
             let mut compiled_args: Vec<BasicMetadataValueEnum> = Vec::new();
             for (j, arg) in call.args.iter().enumerate() {
-                let val = self.codegen_expression(arg)?.ok_or_else(|| GBasicError::CodegenError {
-                    span: None, message: format!("void expression as argument to {namespace}.{method_name}"),
-                })?;
+                let val =
+                    self.codegen_expression(arg)?
+                        .ok_or_else(|| GBasicError::CodegenError {
+                            span: None,
+                            message: format!(
+                                "void expression as argument to {namespace}.{method_name}"
+                            ),
+                        })?;
                 let expected = param_types.get(j).copied().unwrap_or(LType::I64);
                 let converted = self.coerce_to_ltype(val, &self.infer_expr_type(arg), expected)?;
                 compiled_args.push(converted.into());
             }
 
-            let call_result = self.builder
-                .build_call(function, &compiled_args, if ret_type == LType::Void { "" } else { "ns_call" })
+            let call_result = self
+                .builder
+                .build_call(
+                    function,
+                    &compiled_args,
+                    if ret_type == LType::Void {
+                        ""
+                    } else {
+                        "ns_call"
+                    },
+                )
                 .unwrap();
 
             last_result = match ret_type {
@@ -1554,17 +2169,17 @@ impl<'ctx> Codegen<'ctx> {
     ) -> Result<BasicValueEnum<'ctx>, GBasicError> {
         match (from, to) {
             // Int → F64
-            (Type::Int, LType::F64) => {
-                Ok(self.builder.build_signed_int_to_float(
-                    val.into_int_value(), self.context.f64_type(), "itof"
-                ).unwrap().into())
-            }
+            (Type::Int, LType::F64) => Ok(self
+                .builder
+                .build_signed_int_to_float(val.into_int_value(), self.context.f64_type(), "itof")
+                .unwrap()
+                .into()),
             // Float → I64
-            (Type::Float, LType::I64) => {
-                Ok(self.builder.build_float_to_signed_int(
-                    val.into_float_value(), self.context.i64_type(), "ftoi"
-                ).unwrap().into())
-            }
+            (Type::Float, LType::I64) => Ok(self
+                .builder
+                .build_float_to_signed_int(val.into_float_value(), self.context.i64_type(), "ftoi")
+                .unwrap()
+                .into()),
             _ => Ok(val),
         }
     }
@@ -1585,31 +2200,65 @@ impl<'ctx> Codegen<'ctx> {
                 "rect" if args.len() == 2 => {
                     let w = self.codegen_expression(&args[0])?.unwrap();
                     let h = self.codegen_expression(&args[1])?.unwrap();
-                    let wf = self.coerce_to_ltype(w, &self.infer_expr_type(&args[0]), LType::F64)?;
-                    let hf = self.coerce_to_ltype(h, &self.infer_expr_type(&args[1]), LType::F64)?;
-                    return Ok(self.call_runtime("runtime_create_rect", &[LType::F64, LType::F64], LType::I64, &[wf.into(), hf.into()]));
+                    let wf =
+                        self.coerce_to_ltype(w, &self.infer_expr_type(&args[0]), LType::F64)?;
+                    let hf =
+                        self.coerce_to_ltype(h, &self.infer_expr_type(&args[1]), LType::F64)?;
+                    return Ok(self.call_runtime(
+                        "runtime_create_rect",
+                        &[LType::F64, LType::F64],
+                        LType::I64,
+                        &[wf.into(), hf.into()],
+                    ));
                 }
                 "circle" if args.len() == 1 => {
                     let r = self.codegen_expression(&args[0])?.unwrap();
-                    let rf = self.coerce_to_ltype(r, &self.infer_expr_type(&args[0]), LType::F64)?;
-                    return Ok(self.call_runtime("runtime_create_circle", &[LType::F64], LType::I64, &[rf.into()]));
+                    let rf =
+                        self.coerce_to_ltype(r, &self.infer_expr_type(&args[0]), LType::F64)?;
+                    return Ok(self.call_runtime(
+                        "runtime_create_circle",
+                        &[LType::F64],
+                        LType::I64,
+                        &[rf.into()],
+                    ));
                 }
                 "point" if args.len() == 2 => {
-                    // Point(x, y) constructor — only meaningful in property assignment context
+                    // Point(x, y) constructor — pack both into i64: y in upper 32 bits, x in lower 32
                     let x = self.codegen_expression(&args[0])?.unwrap();
-                    let _y = self.codegen_expression(&args[1])?.unwrap();
-                    return Ok(Some(x));
+                    let y = self.codegen_expression(&args[1])?.unwrap();
+                    let i64_type = self.context.i64_type();
+                    let xi =
+                        self.coerce_to_ltype(x, &self.infer_expr_type(&args[0]), LType::I64)?;
+                    let yi =
+                        self.coerce_to_ltype(y, &self.infer_expr_type(&args[1]), LType::I64)?;
+                    let xi64 = xi.into_int_value();
+                    let yi64 = yi.into_int_value();
+                    // Mask x to lower 32 bits, shift y to upper 32 bits
+                    let x_masked = self
+                        .builder
+                        .build_and(xi64, i64_type.const_int(0xFFFF_FFFF, false), "x_lo")
+                        .unwrap();
+                    let y_shifted = self
+                        .builder
+                        .build_left_shift(yi64, i64_type.const_int(32, false), "y_hi")
+                        .unwrap();
+                    let packed = self
+                        .builder
+                        .build_or(x_masked, y_shifted, "point_packed")
+                        .unwrap();
+                    return Ok(Some(packed.into()));
                 }
                 _ => {}
             }
 
             // Regular function call
-            let function = self
-                .module
-                .get_function(&id.name)
-                .ok_or_else(|| GBasicError::CodegenError {
-                    span: None, message: format!("undefined function '{}'", id.name),
-                })?;
+            let function =
+                self.module
+                    .get_function(&id.name)
+                    .ok_or_else(|| GBasicError::CodegenError {
+                        span: None,
+                        message: format!("undefined function '{}'", id.name),
+                    })?;
 
             let mut compiled_args: Vec<BasicMetadataValueEnum> = Vec::new();
             for arg in args {
@@ -1625,7 +2274,8 @@ impl<'ctx> Codegen<'ctx> {
             Ok(call.try_as_basic_value().left())
         } else {
             Err(GBasicError::CodegenError {
-                span: None, message: "only direct function calls supported".into(),
+                span: None,
+                message: "only direct function calls supported".into(),
             })
         }
     }
@@ -1639,7 +2289,11 @@ impl<'ctx> Codegen<'ctx> {
     ) {
         match ty {
             Type::String | Type::Unknown => {
-                let fname = if suffix.is_empty() { "runtime_print" } else { "runtime_print_str_part" };
+                let fname = if suffix.is_empty() {
+                    "runtime_print"
+                } else {
+                    "runtime_print_str_part"
+                };
                 let f = self.module.get_function(fname).unwrap();
                 if let Some(v) = val {
                     self.builder.build_call(f, &[v.into()], "").unwrap();
@@ -1648,22 +2302,33 @@ impl<'ctx> Codegen<'ctx> {
             Type::Int => {
                 let fname = format!("runtime_print_int{suffix}");
                 let f = self.module.get_function(&fname).unwrap();
-                self.builder.build_call(f, &[val.unwrap().into()], "").unwrap();
+                self.builder
+                    .build_call(f, &[val.unwrap().into()], "")
+                    .unwrap();
             }
             Type::Float => {
                 let fname = format!("runtime_print_float{suffix}");
                 let f = self.module.get_function(&fname).unwrap();
-                self.builder.build_call(f, &[val.unwrap().into()], "").unwrap();
+                self.builder
+                    .build_call(f, &[val.unwrap().into()], "")
+                    .unwrap();
             }
             Type::Bool => {
                 let bool_val = val.unwrap().into_int_value();
-                let i64_val = self.builder.build_int_z_extend(bool_val, self.context.i64_type(), "bool_ext").unwrap();
+                let i64_val = self
+                    .builder
+                    .build_int_z_extend(bool_val, self.context.i64_type(), "bool_ext")
+                    .unwrap();
                 let fname = format!("runtime_print_int{suffix}");
                 let f = self.module.get_function(&fname).unwrap();
                 self.builder.build_call(f, &[i64_val.into()], "").unwrap();
             }
             _ => {
-                let fname = if suffix.is_empty() { "runtime_print" } else { "runtime_print_str_part" };
+                let fname = if suffix.is_empty() {
+                    "runtime_print"
+                } else {
+                    "runtime_print_str_part"
+                };
                 let f = self.module.get_function(fname).unwrap();
                 if let Some(v) = val {
                     self.builder.build_call(f, &[v.into()], "").unwrap();
@@ -1679,7 +2344,9 @@ impl<'ctx> Codegen<'ctx> {
                 StringPart::Lit(s) => {
                     let global = self.builder.build_global_string_ptr(s, "str_part").unwrap();
                     let f = self.module.get_function("runtime_print_str_part").unwrap();
-                    self.builder.build_call(f, &[global.as_pointer_value().into()], "").unwrap();
+                    self.builder
+                        .build_call(f, &[global.as_pointer_value().into()], "")
+                        .unwrap();
                 }
                 StringPart::Expr(e) => {
                     let ty = self.infer_expr_type(e);
@@ -1724,10 +2391,45 @@ impl<'ctx> Codegen<'ctx> {
             let val = self.codegen_expression(text_arg)?;
             match self.infer_expr_type(text_arg) {
                 Type::String | Type::Unknown => val.unwrap(),
+                Type::Int => {
+                    let v = val.unwrap();
+                    self.call_runtime("runtime_int_to_str", &[LType::I64], LType::Ptr, &[v.into()])
+                        .unwrap_or_else(|| {
+                            self.builder
+                                .build_global_string_ptr("?", "fallback")
+                                .unwrap()
+                                .as_pointer_value()
+                                .into()
+                        })
+                }
+                Type::Float => {
+                    let v = val.unwrap();
+                    self.call_runtime(
+                        "runtime_float_to_str",
+                        &[LType::F64],
+                        LType::Ptr,
+                        &[v.into()],
+                    )
+                    .unwrap_or_else(|| {
+                        self.builder
+                            .build_global_string_ptr("?", "fallback")
+                            .unwrap()
+                            .as_pointer_value()
+                            .into()
+                    })
+                }
+                Type::Bool => {
+                    let global = self
+                        .builder
+                        .build_global_string_ptr("?", "fallback")
+                        .unwrap();
+                    global.as_pointer_value().into()
+                }
                 _ => {
-                    // Convert to string representation — for MVP just print int/float to stdout
-                    // and return empty string for screen
-                    let global = self.builder.build_global_string_ptr("", "empty").unwrap();
+                    let global = self
+                        .builder
+                        .build_global_string_ptr("?", "fallback")
+                        .unwrap();
                     global.as_pointer_value().into()
                 }
             }
@@ -1743,9 +2445,23 @@ impl<'ctx> Codegen<'ctx> {
         let white = i64_type.const_int(255, false);
         self.call_runtime(
             "runtime_draw_text",
-            &[LType::Ptr, LType::I64, LType::I64, LType::I64, LType::I64, LType::I64],
+            &[
+                LType::Ptr,
+                LType::I64,
+                LType::I64,
+                LType::I64,
+                LType::I64,
+                LType::I64,
+            ],
             LType::Void,
-            &[text_ptr.into(), xi.into(), yi.into(), white.into(), white.into(), white.into()],
+            &[
+                text_ptr.into(),
+                xi.into(),
+                yi.into(),
+                white.into(),
+                white.into(),
+                white.into(),
+            ],
         );
         Ok(None)
     }
@@ -1774,39 +2490,64 @@ impl<'ctx> Codegen<'ctx> {
                             // For MVP, use a runtime helper or just format
                             // Actually, let's use runtime_int_to_str
                             let v = val.unwrap();
-                            self.call_runtime("runtime_int_to_str", &[LType::I64], LType::Ptr, &[v.into()])
-                                .unwrap_or_else(|| {
-                                    self.builder.build_global_string_ptr("?", "fallback").unwrap().as_pointer_value().into()
-                                })
+                            self.call_runtime(
+                                "runtime_int_to_str",
+                                &[LType::I64],
+                                LType::Ptr,
+                                &[v.into()],
+                            )
+                            .unwrap_or_else(|| {
+                                self.builder
+                                    .build_global_string_ptr("?", "fallback")
+                                    .unwrap()
+                                    .as_pointer_value()
+                                    .into()
+                            })
                         }
                         Type::Float => {
                             let v = val.unwrap();
-                            self.call_runtime("runtime_float_to_str", &[LType::F64], LType::Ptr, &[v.into()])
-                                .unwrap_or_else(|| {
-                                    self.builder.build_global_string_ptr("?", "fallback").unwrap().as_pointer_value().into()
-                                })
+                            self.call_runtime(
+                                "runtime_float_to_str",
+                                &[LType::F64],
+                                LType::Ptr,
+                                &[v.into()],
+                            )
+                            .unwrap_or_else(|| {
+                                self.builder
+                                    .build_global_string_ptr("?", "fallback")
+                                    .unwrap()
+                                    .as_pointer_value()
+                                    .into()
+                            })
                         }
-                        _ => {
-                            self.builder.build_global_string_ptr("?", "fallback").unwrap().as_pointer_value().into()
-                        }
+                        _ => self
+                            .builder
+                            .build_global_string_ptr("?", "fallback")
+                            .unwrap()
+                            .as_pointer_value()
+                            .into(),
                     }
                 }
             };
 
             result = Some(match result {
                 None => part_str,
-                Some(prev) => {
-                    self.builder.build_call(concat_fn, &[prev.into(), part_str.into()], "concat")
-                        .unwrap()
-                        .try_as_basic_value()
-                        .left()
-                        .unwrap()
-                }
+                Some(prev) => self
+                    .builder
+                    .build_call(concat_fn, &[prev.into(), part_str.into()], "concat")
+                    .unwrap()
+                    .try_as_basic_value()
+                    .left()
+                    .unwrap(),
             });
         }
 
         Ok(result.unwrap_or_else(|| {
-            self.builder.build_global_string_ptr("", "empty").unwrap().as_pointer_value().into()
+            self.builder
+                .build_global_string_ptr("", "empty")
+                .unwrap()
+                .as_pointer_value()
+                .into()
         }))
     }
 
@@ -1917,8 +2658,9 @@ impl<'ctx> Codegen<'ctx> {
                 .into(),
             _ => {
                 return Err(GBasicError::CodegenError {
-                    span: None, message: format!("unsupported float op: {op}"),
-                })
+                    span: None,
+                    message: format!("unsupported float op: {op}"),
+                });
             }
         })
     }
@@ -1940,23 +2682,32 @@ impl<'ctx> Codegen<'ctx> {
                     .map(|v| v.ty.clone())
                     .unwrap_or(Type::Unknown)
             }
-            Expression::BinaryOp { left, op, right, .. } => {
-                match op {
-                    BinaryOp::Eq | BinaryOp::Neq | BinaryOp::Lt | BinaryOp::Gt
-                    | BinaryOp::Le | BinaryOp::Ge | BinaryOp::And | BinaryOp::Or => Type::Bool,
-                    _ => {
-                        let lt = self.infer_expr_type(left);
-                        let rt = self.infer_expr_type(right);
-                        if matches!(lt, Type::String) {
-                            Type::String
-                        } else if matches!((&lt, &rt), (Type::Int, Type::Float) | (Type::Float, Type::Int)) {
-                            Type::Float
-                        } else {
-                            lt
-                        }
+            Expression::BinaryOp {
+                left, op, right, ..
+            } => match op {
+                BinaryOp::Eq
+                | BinaryOp::Neq
+                | BinaryOp::Lt
+                | BinaryOp::Gt
+                | BinaryOp::Le
+                | BinaryOp::Ge
+                | BinaryOp::And
+                | BinaryOp::Or => Type::Bool,
+                _ => {
+                    let lt = self.infer_expr_type(left);
+                    let rt = self.infer_expr_type(right);
+                    if matches!(lt, Type::String) {
+                        Type::String
+                    } else if matches!(
+                        (&lt, &rt),
+                        (Type::Int, Type::Float) | (Type::Float, Type::Int)
+                    ) {
+                        Type::Float
+                    } else {
+                        lt
                     }
                 }
-            }
+            },
             Expression::UnaryOp { op, operand, .. } => match op {
                 UnaryOp::Not => Type::Bool,
                 UnaryOp::Neg => self.infer_expr_type(operand),
@@ -1966,7 +2717,7 @@ impl<'ctx> Codegen<'ctx> {
                     match id.name.as_str() {
                         // Object constructors — still Call nodes
                         "rect" | "circle" => return Type::Int, // handle is i64
-                        "point" => return Type::Float, // MVP: Point returns float-ish
+                        "point" => return Type::Float,         // MVP: Point returns float-ish
                         _ => {}
                     }
                     if let Some(func) = self.module.get_function(&id.name) {
@@ -2048,12 +2799,10 @@ impl<'ctx> Codegen<'ctx> {
                     Type::Array(Box::new(Type::Unknown))
                 }
             }
-            Expression::Index { object, .. } => {
-                match self.infer_expr_type(object) {
-                    Type::Array(inner) => *inner,
-                    _ => Type::Unknown,
-                }
-            }
+            Expression::Index { object, .. } => match self.infer_expr_type(object) {
+                Type::Array(inner) => *inner,
+                _ => Type::Unknown,
+            },
             Expression::Range { .. } => Type::Unknown,
             Expression::FieldAccess { .. } => {
                 if let Some((var_name, prop_path)) = resolve_field_chain(expr) {
@@ -2075,18 +2824,13 @@ impl<'ctx> Codegen<'ctx> {
         }
     }
 
-    fn build_alloca_for_type(
-        &self,
-        ty: &Type,
-        name: &str,
-    ) -> PointerValue<'ctx> {
-        self.builder.build_alloca(self.type_to_llvm_basic(ty), name).unwrap()
+    fn build_alloca_for_type(&self, ty: &Type, name: &str) -> PointerValue<'ctx> {
+        self.builder
+            .build_alloca(self.type_to_llvm_basic(ty), name)
+            .unwrap()
     }
 
-    fn type_to_llvm_basic(
-        &self,
-        ty: &Type,
-    ) -> inkwell::types::BasicTypeEnum<'ctx> {
+    fn type_to_llvm_basic(&self, ty: &Type) -> inkwell::types::BasicTypeEnum<'ctx> {
         match ty {
             Type::Int => self.context.i64_type().into(),
             Type::Float => self.context.f64_type().into(),
@@ -2103,10 +2847,7 @@ impl<'ctx> Codegen<'ctx> {
         }
     }
 
-    fn type_to_llvm_meta(
-        &self,
-        ty: &Type,
-    ) -> BasicMetadataTypeEnum<'ctx> {
+    fn type_to_llvm_meta(&self, ty: &Type) -> BasicMetadataTypeEnum<'ctx> {
         self.type_to_llvm_basic(ty).into()
     }
 
@@ -2129,9 +2870,22 @@ impl<'ctx> Codegen<'ctx> {
                         if id.name == "point" && args.len() == 2 {
                             let x = self.codegen_expression(&args[0])?.unwrap();
                             let y = self.codegen_expression(&args[1])?.unwrap();
-                            let xf = self.coerce_to_ltype(x, &self.infer_expr_type(&args[0]), LType::F64)?;
-                            let yf = self.coerce_to_ltype(y, &self.infer_expr_type(&args[1]), LType::F64)?;
-                            self.call_runtime("runtime_set_position", &[LType::I64, LType::F64, LType::F64], LType::Void, &[h, xf.into(), yf.into()]);
+                            let xf = self.coerce_to_ltype(
+                                x,
+                                &self.infer_expr_type(&args[0]),
+                                LType::F64,
+                            )?;
+                            let yf = self.coerce_to_ltype(
+                                y,
+                                &self.infer_expr_type(&args[1]),
+                                LType::F64,
+                            )?;
+                            self.call_runtime(
+                                "runtime_set_position",
+                                &[LType::I64, LType::F64, LType::F64],
+                                LType::Void,
+                                &[h, xf.into(), yf.into()],
+                            );
                             return Ok(None);
                         }
                     }
@@ -2144,45 +2898,127 @@ impl<'ctx> Codegen<'ctx> {
                             let zero = f64_type.const_float(0.0);
                             let (px, py) = match last.method.name.as_str() {
                                 "center" => {
-                                    let cx = self.call_runtime("runtime_screen_center_x", &[], LType::F64, &[]).unwrap();
-                                    let cy = self.call_runtime("runtime_screen_center_y", &[], LType::F64, &[]).unwrap();
+                                    let cx = self
+                                        .call_runtime(
+                                            "runtime_screen_center_x",
+                                            &[],
+                                            LType::F64,
+                                            &[],
+                                        )
+                                        .unwrap();
+                                    let cy = self
+                                        .call_runtime(
+                                            "runtime_screen_center_y",
+                                            &[],
+                                            LType::F64,
+                                            &[],
+                                        )
+                                        .unwrap();
                                     (cx, cy)
                                 }
                                 "bottom_center" => {
-                                    let cx = self.call_runtime("runtime_screen_center_x", &[], LType::F64, &[]).unwrap();
-                                    let sh = self.call_runtime("runtime_screen_height", &[], LType::I64, &[]).unwrap();
-                                    let shy = self.builder.build_signed_int_to_float(sh.into_int_value(), f64_type, "sh").unwrap();
+                                    let cx = self
+                                        .call_runtime(
+                                            "runtime_screen_center_x",
+                                            &[],
+                                            LType::F64,
+                                            &[],
+                                        )
+                                        .unwrap();
+                                    let sh = self
+                                        .call_runtime("runtime_screen_height", &[], LType::I64, &[])
+                                        .unwrap();
+                                    let shy = self
+                                        .builder
+                                        .build_signed_int_to_float(
+                                            sh.into_int_value(),
+                                            f64_type,
+                                            "sh",
+                                        )
+                                        .unwrap();
                                     (cx, shy.into())
                                 }
                                 "top_center" => {
-                                    let cx = self.call_runtime("runtime_screen_center_x", &[], LType::F64, &[]).unwrap();
+                                    let cx = self
+                                        .call_runtime(
+                                            "runtime_screen_center_x",
+                                            &[],
+                                            LType::F64,
+                                            &[],
+                                        )
+                                        .unwrap();
                                     (cx, zero.into())
                                 }
                                 "top_left" => (zero.into(), zero.into()),
                                 "top_right" => {
-                                    let sw = self.call_runtime("runtime_screen_width", &[], LType::I64, &[]).unwrap();
-                                    let swf = self.builder.build_signed_int_to_float(sw.into_int_value(), f64_type, "sw").unwrap();
+                                    let sw = self
+                                        .call_runtime("runtime_screen_width", &[], LType::I64, &[])
+                                        .unwrap();
+                                    let swf = self
+                                        .builder
+                                        .build_signed_int_to_float(
+                                            sw.into_int_value(),
+                                            f64_type,
+                                            "sw",
+                                        )
+                                        .unwrap();
                                     (swf.into(), zero.into())
                                 }
                                 "bottom_left" => {
-                                    let sh = self.call_runtime("runtime_screen_height", &[], LType::I64, &[]).unwrap();
-                                    let shy = self.builder.build_signed_int_to_float(sh.into_int_value(), f64_type, "sh").unwrap();
+                                    let sh = self
+                                        .call_runtime("runtime_screen_height", &[], LType::I64, &[])
+                                        .unwrap();
+                                    let shy = self
+                                        .builder
+                                        .build_signed_int_to_float(
+                                            sh.into_int_value(),
+                                            f64_type,
+                                            "sh",
+                                        )
+                                        .unwrap();
                                     (zero.into(), shy.into())
                                 }
                                 "bottom_right" => {
-                                    let sw = self.call_runtime("runtime_screen_width", &[], LType::I64, &[]).unwrap();
-                                    let sh = self.call_runtime("runtime_screen_height", &[], LType::I64, &[]).unwrap();
-                                    let swf = self.builder.build_signed_int_to_float(sw.into_int_value(), f64_type, "sw").unwrap();
-                                    let shy = self.builder.build_signed_int_to_float(sh.into_int_value(), f64_type, "sh").unwrap();
+                                    let sw = self
+                                        .call_runtime("runtime_screen_width", &[], LType::I64, &[])
+                                        .unwrap();
+                                    let sh = self
+                                        .call_runtime("runtime_screen_height", &[], LType::I64, &[])
+                                        .unwrap();
+                                    let swf = self
+                                        .builder
+                                        .build_signed_int_to_float(
+                                            sw.into_int_value(),
+                                            f64_type,
+                                            "sw",
+                                        )
+                                        .unwrap();
+                                    let shy = self
+                                        .builder
+                                        .build_signed_int_to_float(
+                                            sh.into_int_value(),
+                                            f64_type,
+                                            "sh",
+                                        )
+                                        .unwrap();
                                     (swf.into(), shy.into())
                                 }
                                 _ => {
                                     return Err(GBasicError::CodegenError {
-                                        span: Some(span), message: format!("unknown Screen property '{}'", last.method.name),
+                                        span: Some(span),
+                                        message: format!(
+                                            "unknown Screen property '{}'",
+                                            last.method.name
+                                        ),
                                     });
                                 }
                             };
-                            self.call_runtime("runtime_set_position", &[LType::I64, LType::F64, LType::F64], LType::Void, &[h, px.into(), py.into()]);
+                            self.call_runtime(
+                                "runtime_set_position",
+                                &[LType::I64, LType::F64, LType::F64],
+                                LType::Void,
+                                &[h, px.into(), py.into()],
+                            );
                             return Ok(None);
                         }
                     }
@@ -2194,13 +3030,23 @@ impl<'ctx> Codegen<'ctx> {
             "position.x" => {
                 let val = self.codegen_expression(value)?.unwrap();
                 let vf = self.coerce_to_ltype(val, &self.infer_expr_type(value), LType::F64)?;
-                self.call_runtime("runtime_set_position_x", &[LType::I64, LType::F64], LType::Void, &[h, vf.into()]);
+                self.call_runtime(
+                    "runtime_set_position_x",
+                    &[LType::I64, LType::F64],
+                    LType::Void,
+                    &[h, vf.into()],
+                );
                 Ok(None)
             }
             "position.y" => {
                 let val = self.codegen_expression(value)?.unwrap();
                 let vf = self.coerce_to_ltype(val, &self.infer_expr_type(value), LType::F64)?;
-                self.call_runtime("runtime_set_position_y", &[LType::I64, LType::F64], LType::Void, &[h, vf.into()]);
+                self.call_runtime(
+                    "runtime_set_position_y",
+                    &[LType::I64, LType::F64],
+                    LType::Void,
+                    &[h, vf.into()],
+                );
                 Ok(None)
             }
             "color" => {
@@ -2210,7 +3056,12 @@ impl<'ctx> Codegen<'ctx> {
                         let ri = self.context.i64_type().const_int(r as u64, false);
                         let gi = self.context.i64_type().const_int(g as u64, false);
                         let bi = self.context.i64_type().const_int(b as u64, false);
-                        self.call_runtime("runtime_set_color", &[LType::I64, LType::I64, LType::I64, LType::I64], LType::Void, &[h, ri.into(), gi.into(), bi.into()]);
+                        self.call_runtime(
+                            "runtime_set_color",
+                            &[LType::I64, LType::I64, LType::I64, LType::I64],
+                            LType::Void,
+                            &[h, ri.into(), gi.into(), bi.into()],
+                        );
                         return Ok(None);
                     }
                 }
@@ -2220,7 +3071,12 @@ impl<'ctx> Codegen<'ctx> {
                             let r = self.codegen_expression(&args[0])?.unwrap();
                             let g = self.codegen_expression(&args[1])?.unwrap();
                             let b = self.codegen_expression(&args[2])?.unwrap();
-                            self.call_runtime("runtime_set_color", &[LType::I64, LType::I64, LType::I64, LType::I64], LType::Void, &[h, r.into(), g.into(), b.into()]);
+                            self.call_runtime(
+                                "runtime_set_color",
+                                &[LType::I64, LType::I64, LType::I64, LType::I64],
+                                LType::Void,
+                                &[h, r.into(), g.into(), b.into()],
+                            );
                             return Ok(None);
                         }
                     }
@@ -2229,12 +3085,32 @@ impl<'ctx> Codegen<'ctx> {
                 let val = self.codegen_expression(value)?.unwrap();
                 let i64_type = self.context.i64_type();
                 let iv = val.into_int_value();
-                let r = self.builder.build_right_shift(iv, i64_type.const_int(16, false), false, "r").unwrap();
-                let g = self.builder.build_right_shift(iv, i64_type.const_int(8, false), false, "g").unwrap();
-                let b = self.builder.build_and(iv, i64_type.const_int(0xFF, false), "b").unwrap();
-                let r = self.builder.build_and(r, i64_type.const_int(0xFF, false), "r").unwrap();
-                let g = self.builder.build_and(g, i64_type.const_int(0xFF, false), "g").unwrap();
-                self.call_runtime("runtime_set_color", &[LType::I64, LType::I64, LType::I64, LType::I64], LType::Void, &[h, r.into(), g.into(), b.into()]);
+                let r = self
+                    .builder
+                    .build_right_shift(iv, i64_type.const_int(16, false), false, "r")
+                    .unwrap();
+                let g = self
+                    .builder
+                    .build_right_shift(iv, i64_type.const_int(8, false), false, "g")
+                    .unwrap();
+                let b = self
+                    .builder
+                    .build_and(iv, i64_type.const_int(0xFF, false), "b")
+                    .unwrap();
+                let r = self
+                    .builder
+                    .build_and(r, i64_type.const_int(0xFF, false), "r")
+                    .unwrap();
+                let g = self
+                    .builder
+                    .build_and(g, i64_type.const_int(0xFF, false), "g")
+                    .unwrap();
+                self.call_runtime(
+                    "runtime_set_color",
+                    &[LType::I64, LType::I64, LType::I64, LType::I64],
+                    LType::Void,
+                    &[h, r.into(), g.into(), b.into()],
+                );
                 Ok(None)
             }
             "velocity" => {
@@ -2244,64 +3120,123 @@ impl<'ctx> Codegen<'ctx> {
                         if id.name == "point" && args.len() == 2 {
                             let vx = self.codegen_expression(&args[0])?.unwrap();
                             let vy = self.codegen_expression(&args[1])?.unwrap();
-                            let vxf = self.coerce_to_ltype(vx, &self.infer_expr_type(&args[0]), LType::F64)?;
-                            let vyf = self.coerce_to_ltype(vy, &self.infer_expr_type(&args[1]), LType::F64)?;
-                            self.call_runtime("runtime_set_velocity", &[LType::I64, LType::F64, LType::F64], LType::Void, &[h, vxf.into(), vyf.into()]);
+                            let vxf = self.coerce_to_ltype(
+                                vx,
+                                &self.infer_expr_type(&args[0]),
+                                LType::F64,
+                            )?;
+                            let vyf = self.coerce_to_ltype(
+                                vy,
+                                &self.infer_expr_type(&args[1]),
+                                LType::F64,
+                            )?;
+                            self.call_runtime(
+                                "runtime_set_velocity",
+                                &[LType::I64, LType::F64, LType::F64],
+                                LType::Void,
+                                &[h, vxf.into(), vyf.into()],
+                            );
                             return Ok(None);
                         }
                     }
                 }
                 Err(GBasicError::CodegenError {
-                    span: Some(span), message: "unsupported value for .velocity assignment; use Point(vx, vy)".into(),
+                    span: Some(span),
+                    message: "unsupported value for .velocity assignment; use Point(vx, vy)".into(),
                 })
             }
             "velocity.x" => {
                 let val = self.codegen_expression(value)?.unwrap();
                 let vf = self.coerce_to_ltype(val, &self.infer_expr_type(value), LType::F64)?;
-                self.call_runtime("runtime_set_velocity_x", &[LType::I64, LType::F64], LType::Void, &[h, vf.into()]);
+                self.call_runtime(
+                    "runtime_set_velocity_x",
+                    &[LType::I64, LType::F64],
+                    LType::Void,
+                    &[h, vf.into()],
+                );
                 Ok(None)
             }
             "velocity.y" => {
                 let val = self.codegen_expression(value)?.unwrap();
                 let vf = self.coerce_to_ltype(val, &self.infer_expr_type(value), LType::F64)?;
-                self.call_runtime("runtime_set_velocity_y", &[LType::I64, LType::F64], LType::Void, &[h, vf.into()]);
+                self.call_runtime(
+                    "runtime_set_velocity_y",
+                    &[LType::I64, LType::F64],
+                    LType::Void,
+                    &[h, vf.into()],
+                );
                 Ok(None)
             }
             "gravity" => {
                 let val = self.codegen_expression(value)?.unwrap();
                 let vf = self.coerce_to_ltype(val, &self.infer_expr_type(value), LType::F64)?;
-                self.call_runtime("runtime_set_gravity", &[LType::I64, LType::F64], LType::Void, &[h, vf.into()]);
+                self.call_runtime(
+                    "runtime_set_gravity",
+                    &[LType::I64, LType::F64],
+                    LType::Void,
+                    &[h, vf.into()],
+                );
                 Ok(None)
             }
             "solid" => {
                 let val = self.codegen_expression(value)?.unwrap();
                 // Convert bool (i1) to i64
                 let iv = val.into_int_value();
-                let i64_val = self.builder.build_int_z_extend(iv, self.context.i64_type(), "bool_ext").unwrap();
-                self.call_runtime("runtime_set_solid", &[LType::I64, LType::I64], LType::Void, &[h, i64_val.into()]);
+                let i64_val = self
+                    .builder
+                    .build_int_z_extend(iv, self.context.i64_type(), "bool_ext")
+                    .unwrap();
+                self.call_runtime(
+                    "runtime_set_solid",
+                    &[LType::I64, LType::I64],
+                    LType::Void,
+                    &[h, i64_val.into()],
+                );
                 Ok(None)
             }
             "bounces" => {
                 let val = self.codegen_expression(value)?.unwrap();
                 let iv = val.into_int_value();
-                let i64_val = self.builder.build_int_z_extend(iv, self.context.i64_type(), "bool_ext").unwrap();
-                self.call_runtime("runtime_set_bounces", &[LType::I64, LType::I64], LType::Void, &[h, i64_val.into()]);
+                let i64_val = self
+                    .builder
+                    .build_int_z_extend(iv, self.context.i64_type(), "bool_ext")
+                    .unwrap();
+                self.call_runtime(
+                    "runtime_set_bounces",
+                    &[LType::I64, LType::I64],
+                    LType::Void,
+                    &[h, i64_val.into()],
+                );
                 Ok(None)
             }
             "visible" => {
                 let val = self.codegen_expression(value)?.unwrap();
                 let iv = val.into_int_value();
-                let i64_val = self.builder.build_int_z_extend(iv, self.context.i64_type(), "bool_ext").unwrap();
-                self.call_runtime("runtime_set_visible", &[LType::I64, LType::I64], LType::Void, &[h, i64_val.into()]);
+                let i64_val = self
+                    .builder
+                    .build_int_z_extend(iv, self.context.i64_type(), "bool_ext")
+                    .unwrap();
+                self.call_runtime(
+                    "runtime_set_visible",
+                    &[LType::I64, LType::I64],
+                    LType::Void,
+                    &[h, i64_val.into()],
+                );
                 Ok(None)
             }
             "layer" => {
                 let val = self.codegen_expression(value)?.unwrap();
-                self.call_runtime("runtime_set_layer", &[LType::I64, LType::I64], LType::Void, &[h, val.into()]);
+                self.call_runtime(
+                    "runtime_set_layer",
+                    &[LType::I64, LType::I64],
+                    LType::Void,
+                    &[h, val.into()],
+                );
                 Ok(None)
             }
             _ => Err(GBasicError::CodegenError {
-                span: Some(span), message: format!("unknown property '{prop_path}' for assignment"),
+                span: Some(span),
+                message: format!("unknown property '{prop_path}' for assignment"),
             }),
         }
     }
@@ -2319,21 +3254,65 @@ impl<'ctx> Codegen<'ctx> {
                     if let Some(last) = chain.last() {
                         self.call_runtime("ensure_screen_init", &[], LType::Void, &[]);
                         match (last.method.name.as_str(), field.name.as_str()) {
-                            ("center", "x") => return Ok(self.call_runtime("runtime_screen_center_x", &[], LType::F64, &[])),
-                            ("center", "y") => return Ok(self.call_runtime("runtime_screen_center_y", &[], LType::F64, &[])),
-                            ("bottom_center", "x") | ("top_center", "x") => return Ok(self.call_runtime("runtime_screen_center_x", &[], LType::F64, &[])),
-                            ("bottom_center", "y") | ("bottom_left", "y") | ("bottom_right", "y") => {
-                                let h = self.call_runtime("runtime_screen_height", &[], LType::I64, &[]).unwrap();
-                                let hf = self.builder.build_signed_int_to_float(h.into_int_value(), self.context.f64_type(), "hf").unwrap();
+                            ("center", "x") => {
+                                return Ok(self.call_runtime(
+                                    "runtime_screen_center_x",
+                                    &[],
+                                    LType::F64,
+                                    &[],
+                                ));
+                            }
+                            ("center", "y") => {
+                                return Ok(self.call_runtime(
+                                    "runtime_screen_center_y",
+                                    &[],
+                                    LType::F64,
+                                    &[],
+                                ));
+                            }
+                            ("bottom_center", "x") | ("top_center", "x") => {
+                                return Ok(self.call_runtime(
+                                    "runtime_screen_center_x",
+                                    &[],
+                                    LType::F64,
+                                    &[],
+                                ));
+                            }
+                            ("bottom_center", "y")
+                            | ("bottom_left", "y")
+                            | ("bottom_right", "y") => {
+                                let h = self
+                                    .call_runtime("runtime_screen_height", &[], LType::I64, &[])
+                                    .unwrap();
+                                let hf = self
+                                    .builder
+                                    .build_signed_int_to_float(
+                                        h.into_int_value(),
+                                        self.context.f64_type(),
+                                        "hf",
+                                    )
+                                    .unwrap();
                                 return Ok(Some(hf.into()));
                             }
-                            ("top_left", "x") | ("top_center", "y") | ("top_left", "y") | ("bottom_left", "x") => {
+                            ("top_left", "x")
+                            | ("top_center", "y")
+                            | ("top_left", "y")
+                            | ("bottom_left", "x") => {
                                 return Ok(Some(self.context.f64_type().const_float(0.0).into()));
                             }
                             ("top_right", "x") | ("bottom_right", "x") | ("top_right", "y") => {
                                 if field.name.as_str() == "x" {
-                                    let w = self.call_runtime("runtime_screen_width", &[], LType::I64, &[]).unwrap();
-                                    let wf = self.builder.build_signed_int_to_float(w.into_int_value(), self.context.f64_type(), "wf").unwrap();
+                                    let w = self
+                                        .call_runtime("runtime_screen_width", &[], LType::I64, &[])
+                                        .unwrap();
+                                    let wf = self
+                                        .builder
+                                        .build_signed_int_to_float(
+                                            w.into_int_value(),
+                                            self.context.f64_type(),
+                                            "wf",
+                                        )
+                                        .unwrap();
                                     return Ok(Some(wf.into()));
                                 }
                                 return Ok(Some(self.context.f64_type().const_float(0.0).into()));
@@ -2368,7 +3347,10 @@ impl<'ctx> Codegen<'ctx> {
                         Ok(self.call_runtime("runtime_screen_center_y", &[], LType::F64, &[]))
                     }
                     _ => {
-                        let null = self.context.ptr_type(inkwell::AddressSpace::default()).const_null();
+                        let null = self
+                            .context
+                            .ptr_type(inkwell::AddressSpace::default())
+                            .const_null();
                         Ok(Some(null.into()))
                     }
                 };
@@ -2380,9 +3362,14 @@ impl<'ctx> Codegen<'ctx> {
                 return match prop_path.as_str() {
                     "x" => Ok(self.call_runtime("runtime_input_mouse_x", &[], LType::I64, &[])),
                     "y" => Ok(self.call_runtime("runtime_input_mouse_y", &[], LType::I64, &[])),
-                    "clicked" => Ok(self.call_runtime("runtime_input_mouse_clicked", &[], LType::Bool, &[])),
+                    "clicked" => {
+                        Ok(self.call_runtime("runtime_input_mouse_clicked", &[], LType::Bool, &[]))
+                    }
                     _ => {
-                        let null = self.context.ptr_type(inkwell::AddressSpace::default()).const_null();
+                        let null = self
+                            .context
+                            .ptr_type(inkwell::AddressSpace::default())
+                            .const_null();
                         Ok(Some(null.into()))
                     }
                 };
@@ -2396,15 +3383,53 @@ impl<'ctx> Codegen<'ctx> {
                 let h: BasicMetadataValueEnum = handle.into();
 
                 return match prop_path.as_str() {
-                    "position.x" | "x" => Ok(self.call_runtime("runtime_get_position_x", &[LType::I64], LType::F64, &[h])),
-                    "position.y" | "y" => Ok(self.call_runtime("runtime_get_position_y", &[LType::I64], LType::F64, &[h])),
-                    "velocity.x" => Ok(self.call_runtime("runtime_get_velocity_x", &[LType::I64], LType::F64, &[h])),
-                    "velocity.y" => Ok(self.call_runtime("runtime_get_velocity_y", &[LType::I64], LType::F64, &[h])),
-                    "size.width" => Ok(self.call_runtime("runtime_get_size_width", &[LType::I64], LType::F64, &[h])),
-                    "size.height" => Ok(self.call_runtime("runtime_get_size_height", &[LType::I64], LType::F64, &[h])),
-                    "length" => Ok(self.call_runtime("runtime_array_length", &[LType::I64], LType::I64, &[h])),
+                    "position.x" | "x" => Ok(self.call_runtime(
+                        "runtime_get_position_x",
+                        &[LType::I64],
+                        LType::F64,
+                        &[h],
+                    )),
+                    "position.y" | "y" => Ok(self.call_runtime(
+                        "runtime_get_position_y",
+                        &[LType::I64],
+                        LType::F64,
+                        &[h],
+                    )),
+                    "velocity.x" => Ok(self.call_runtime(
+                        "runtime_get_velocity_x",
+                        &[LType::I64],
+                        LType::F64,
+                        &[h],
+                    )),
+                    "velocity.y" => Ok(self.call_runtime(
+                        "runtime_get_velocity_y",
+                        &[LType::I64],
+                        LType::F64,
+                        &[h],
+                    )),
+                    "size.width" => Ok(self.call_runtime(
+                        "runtime_get_size_width",
+                        &[LType::I64],
+                        LType::F64,
+                        &[h],
+                    )),
+                    "size.height" => Ok(self.call_runtime(
+                        "runtime_get_size_height",
+                        &[LType::I64],
+                        LType::F64,
+                        &[h],
+                    )),
+                    "length" => Ok(self.call_runtime(
+                        "runtime_array_length",
+                        &[LType::I64],
+                        LType::I64,
+                        &[h],
+                    )),
                     _ => {
-                        let null = self.context.ptr_type(inkwell::AddressSpace::default()).const_null();
+                        let null = self
+                            .context
+                            .ptr_type(inkwell::AddressSpace::default())
+                            .const_null();
                         Ok(Some(null.into()))
                     }
                 };
@@ -2412,7 +3437,10 @@ impl<'ctx> Codegen<'ctx> {
         }
 
         // Unresolvable — return null pointer as fallback
-        let null = self.context.ptr_type(inkwell::AddressSpace::default()).const_null();
+        let null = self
+            .context
+            .ptr_type(inkwell::AddressSpace::default())
+            .const_null();
         Ok(Some(null.into()))
     }
 
@@ -2433,12 +3461,22 @@ impl<'ctx> Codegen<'ctx> {
                 let dy = self.codegen_expression(&args[1])?.unwrap();
                 let dxf = self.coerce_to_ltype(dx, &self.infer_expr_type(&args[0]), LType::F64)?;
                 let dyf = self.coerce_to_ltype(dy, &self.infer_expr_type(&args[1]), LType::F64)?;
-                self.call_runtime("runtime_object_move", &[LType::I64, LType::F64, LType::F64], LType::Void, &[h, dxf.into(), dyf.into()]);
+                self.call_runtime(
+                    "runtime_object_move",
+                    &[LType::I64, LType::F64, LType::F64],
+                    LType::Void,
+                    &[h, dxf.into(), dyf.into()],
+                );
                 Ok(None)
             }
             "collides" if args.len() == 1 => {
                 let other = self.codegen_expression(&args[0])?.unwrap();
-                let result = self.call_runtime("runtime_object_collides", &[LType::I64, LType::I64], LType::Bool, &[h, other.into()]);
+                let result = self.call_runtime(
+                    "runtime_object_collides",
+                    &[LType::I64, LType::I64],
+                    LType::Bool,
+                    &[h, other.into()],
+                );
                 Ok(result)
             }
             "contains" if args.len() == 2 => {
@@ -2446,7 +3484,12 @@ impl<'ctx> Codegen<'ctx> {
                 let y = self.codegen_expression(&args[1])?.unwrap();
                 let xf = self.coerce_to_ltype(x, &self.infer_expr_type(&args[0]), LType::F64)?;
                 let yf = self.coerce_to_ltype(y, &self.infer_expr_type(&args[1]), LType::F64)?;
-                let result = self.call_runtime("runtime_object_contains", &[LType::I64, LType::F64, LType::F64], LType::Bool, &[h, xf.into(), yf.into()]);
+                let result = self.call_runtime(
+                    "runtime_object_contains",
+                    &[LType::I64, LType::F64, LType::F64],
+                    LType::Bool,
+                    &[h, xf.into(), yf.into()],
+                );
                 Ok(result)
             }
             "remove" => {
@@ -2455,12 +3498,22 @@ impl<'ctx> Codegen<'ctx> {
             }
             "add" if args.len() == 1 => {
                 let val = self.codegen_expression(&args[0])?.unwrap();
-                self.call_runtime("runtime_array_add", &[LType::I64, LType::I64], LType::Void, &[h, val.into()]);
+                self.call_runtime(
+                    "runtime_array_add",
+                    &[LType::I64, LType::I64],
+                    LType::Void,
+                    &[h, val.into()],
+                );
                 Ok(None)
             }
             "remove_from" if args.len() == 1 => {
                 let val = self.codegen_expression(&args[0])?.unwrap();
-                self.call_runtime("runtime_array_remove_value", &[LType::I64, LType::I64], LType::Void, &[h, val.into()]);
+                self.call_runtime(
+                    "runtime_array_remove_value",
+                    &[LType::I64, LType::I64],
+                    LType::Void,
+                    &[h, val.into()],
+                );
                 Ok(None)
             }
             "at" if args.len() == 2 => {
@@ -2478,11 +3531,10 @@ impl<'ctx> Codegen<'ctx> {
                 let _ = y;
                 Ok(None)
             }
-            _ => {
-                Err(GBasicError::CodegenError {
-                    span: None, message: format!("unknown object method '.{method}()'"),
-                })
-            }
+            _ => Err(GBasicError::CodegenError {
+                span: None,
+                message: format!("unknown object method '.{method}()'"),
+            }),
         }
     }
 
@@ -2592,15 +3644,20 @@ impl<'ctx> Codegen<'ctx> {
             .status()
             .map_err(|e| GBasicError::CodegenError {
                 span: None,
-                message: format!("failed to run wasm-opt ({}): {e}. Install with: brew install binaryen", wasm_opt),
+                message: format!(
+                    "failed to run wasm-opt ({}): {e}. Install with: brew install binaryen",
+                    wasm_opt
+                ),
             })?;
 
         if asyncify_status.success() {
             // Replace the original with the asyncified version
             let _ = std::fs::remove_file(&wasm_path);
-            std::fs::rename(&asyncified_path, &wasm_path).map_err(|e| GBasicError::CodegenError {
-                span: None,
-                message: format!("failed to rename asyncified wasm: {e}"),
+            std::fs::rename(&asyncified_path, &wasm_path).map_err(|e| {
+                GBasicError::CodegenError {
+                    span: None,
+                    message: format!("failed to rename asyncified wasm: {e}"),
+                }
             })?;
         } else {
             // Non-fatal: fall back to synchronous wasm
@@ -2617,13 +3674,15 @@ impl<'ctx> Codegen<'ctx> {
     fn emit_and_link(&self, output_path: &str) -> Result<(), GBasicError> {
         Target::initialize_native(&InitializationConfig::default()).map_err(|e| {
             GBasicError::CodegenError {
-                span: None, message: format!("failed to init native target: {e}"),
+                span: None,
+                message: format!("failed to init native target: {e}"),
             }
         })?;
 
         let triple = TargetMachine::get_default_triple();
         let target = Target::from_triple(&triple).map_err(|e| GBasicError::CodegenError {
-            span: None, message: format!("failed to get target: {e}"),
+            span: None,
+            message: format!("failed to get target: {e}"),
         })?;
         let machine = target
             .create_target_machine(
@@ -2635,7 +3694,8 @@ impl<'ctx> Codegen<'ctx> {
                 CodeModel::Default,
             )
             .ok_or_else(|| GBasicError::CodegenError {
-                span: None, message: "failed to create target machine".into(),
+                span: None,
+                message: "failed to create target machine".into(),
             })?;
 
         let obj_path_str = format!("{output_path}.o");
@@ -2643,7 +3703,8 @@ impl<'ctx> Codegen<'ctx> {
         machine
             .write_to_file(&self.module, FileType::Object, obj_path)
             .map_err(|e| GBasicError::CodegenError {
-                span: None, message: format!("failed to write object file: {e}"),
+                span: None,
+                message: format!("failed to write object file: {e}"),
             })?;
 
         // Find workspace root: try exe dir ancestors, then CARGO_MANIFEST_DIR, then cwd
@@ -2717,9 +3778,7 @@ impl<'ctx> Codegen<'ctx> {
         };
 
         let mut cmd = Command::new(linker);
-        cmd.arg(&obj_path_str)
-            .arg("-o")
-            .arg(output_path);
+        cmd.arg(&obj_path_str).arg("-o").arg(output_path);
 
         if runtime_lib.exists() {
             cmd.arg(runtime_lib.to_str().unwrap());
@@ -2731,16 +3790,26 @@ impl<'ctx> Codegen<'ctx> {
                     "macos" => {
                         cmd.arg(format!("-Wl,-rpath,{}", sdl2_dir.display()))
                             .arg("-lSDL2")
-                            .arg("-framework").arg("Cocoa")
-                            .arg("-framework").arg("IOKit")
-                            .arg("-framework").arg("CoreVideo")
-                            .arg("-framework").arg("CoreAudio")
-                            .arg("-framework").arg("AudioToolbox")
-                            .arg("-framework").arg("Carbon")
-                            .arg("-framework").arg("ForceFeedback")
-                            .arg("-framework").arg("GameController")
-                            .arg("-framework").arg("CoreHaptics")
-                            .arg("-framework").arg("Metal")
+                            .arg("-framework")
+                            .arg("Cocoa")
+                            .arg("-framework")
+                            .arg("IOKit")
+                            .arg("-framework")
+                            .arg("CoreVideo")
+                            .arg("-framework")
+                            .arg("CoreAudio")
+                            .arg("-framework")
+                            .arg("AudioToolbox")
+                            .arg("-framework")
+                            .arg("Carbon")
+                            .arg("-framework")
+                            .arg("ForceFeedback")
+                            .arg("-framework")
+                            .arg("GameController")
+                            .arg("-framework")
+                            .arg("CoreHaptics")
+                            .arg("-framework")
+                            .arg("Metal")
                             .arg("-liconv");
                     }
                     "linux" => {
@@ -2778,12 +3847,14 @@ impl<'ctx> Codegen<'ctx> {
         }
 
         let status = cmd.status().map_err(|e| GBasicError::CodegenError {
-            span: None, message: format!("failed to run linker: {e}"),
+            span: None,
+            message: format!("failed to run linker: {e}"),
         })?;
 
         if !status.success() {
             return Err(GBasicError::CodegenError {
-                span: None, message: format!("linking failed with status: {status}"),
+                span: None,
+                message: format!("linking failed with status: {status}"),
             });
         }
 

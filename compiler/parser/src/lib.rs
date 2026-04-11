@@ -1,11 +1,11 @@
 pub mod expr;
-pub mod stmt;
 pub mod method_chain;
+pub mod stmt;
 
 use gbasic_common::ast::*;
 use gbasic_common::error::GBasicError;
 use gbasic_common::span::Span;
-use gbasic_lexer::{tokenize, SpannedToken, Token};
+use gbasic_lexer::{SpannedToken, Token, tokenize};
 
 pub struct Parser {
     tokens: Vec<SpannedToken>,
@@ -82,8 +82,16 @@ impl Parser {
         loop {
             match self.current() {
                 Token::Eof => return,
-                Token::Let | Token::Fun | Token::Fn | Token::If | Token::For | Token::While
-                | Token::Match | Token::Return | Token::Break | Token::Continue => return,
+                Token::Let
+                | Token::Fun
+                | Token::Fn
+                | Token::If
+                | Token::For
+                | Token::While
+                | Token::Match
+                | Token::Return
+                | Token::Break
+                | Token::Continue => return,
                 Token::RBrace => {
                     self.advance();
                     return;
@@ -160,7 +168,10 @@ mod tests {
         assert_eq!(program.statements.len(), 1);
         assert!(matches!(
             &program.statements[0],
-            Statement::If { else_block: Some(_), .. }
+            Statement::If {
+                else_block: Some(_),
+                ..
+            }
         ));
     }
 
@@ -198,7 +209,10 @@ mod tests {
                 assert_eq!(*op, BinaryOp::Add);
                 assert!(matches!(
                     right.as_ref(),
-                    Expression::BinaryOp { op: BinaryOp::Mul, .. }
+                    Expression::BinaryOp {
+                        op: BinaryOp::Mul,
+                        ..
+                    }
                 ));
             } else {
                 panic!("expected binary op");
@@ -260,7 +274,13 @@ mod tests {
         assert_eq!(program.statements.len(), 1);
         if let Statement::Expression { expr, .. } = &program.statements[0] {
             // print() desugars to Screen.Layer(0).Print() in the parser
-            assert!(matches!(expr, Expression::MethodChain { base: NamespaceRef::Screen, .. }));
+            assert!(matches!(
+                expr,
+                Expression::MethodChain {
+                    base: NamespaceRef::Screen,
+                    ..
+                }
+            ));
         } else {
             panic!("expected expression statement");
         }
@@ -273,7 +293,9 @@ mod tests {
             if let Expression::MethodChain { chain, .. } = expr {
                 // Last method in chain is Print with the interpolated string arg
                 let print_call = chain.last().expect("chain should not be empty");
-                assert!(matches!(&print_call.args[0], Expression::StringInterp { parts, .. } if parts.len() == 3));
+                assert!(
+                    matches!(&print_call.args[0], Expression::StringInterp { parts, .. } if parts.len() == 3)
+                );
             } else {
                 panic!("expected MethodChain");
             }
@@ -288,7 +310,10 @@ mod tests {
                 let print_call = chain.last().expect("chain should not be empty");
                 if let Expression::StringInterp { parts, .. } = &print_call.args[0] {
                     assert_eq!(parts.len(), 1);
-                    assert!(matches!(&parts[0], StringPart::Expr(Expression::BinaryOp { .. })));
+                    assert!(matches!(
+                        &parts[0],
+                        StringPart::Expr(Expression::BinaryOp { .. })
+                    ));
                 } else {
                     panic!("expected interp");
                 }
@@ -309,7 +334,13 @@ mod tests {
     fn test_plain_string_no_interp() {
         let program = parse(r#"let s = "no braces here""#).unwrap();
         if let Statement::Let { value, .. } = &program.statements[0] {
-            assert!(matches!(value, Expression::Literal(Literal { kind: LiteralKind::String(_), .. })));
+            assert!(matches!(
+                value,
+                Expression::Literal(Literal {
+                    kind: LiteralKind::String(_),
+                    ..
+                })
+            ));
         }
     }
 
@@ -354,7 +385,13 @@ mod tests {
     fn test_or_keyword() {
         let program = parse("if a or b { }").unwrap();
         if let Statement::If { condition, .. } = &program.statements[0] {
-            assert!(matches!(condition, Expression::BinaryOp { op: BinaryOp::Or, .. }));
+            assert!(matches!(
+                condition,
+                Expression::BinaryOp {
+                    op: BinaryOp::Or,
+                    ..
+                }
+            ));
         }
     }
 
@@ -362,7 +399,13 @@ mod tests {
     fn test_not_keyword() {
         let program = parse("if not alive { }").unwrap();
         if let Statement::If { condition, .. } = &program.statements[0] {
-            assert!(matches!(condition, Expression::UnaryOp { op: UnaryOp::Not, .. }));
+            assert!(matches!(
+                condition,
+                Expression::UnaryOp {
+                    op: UnaryOp::Not,
+                    ..
+                }
+            ));
         }
     }
 
@@ -377,9 +420,19 @@ mod tests {
     fn test_else_if() {
         let program = parse("if x > 10 { } else if x > 5 { } else { }").unwrap();
         assert_eq!(program.statements.len(), 1);
-        if let Statement::If { else_block: Some(eb), .. } = &program.statements[0] {
+        if let Statement::If {
+            else_block: Some(eb),
+            ..
+        } = &program.statements[0]
+        {
             assert_eq!(eb.statements.len(), 1);
-            assert!(matches!(&eb.statements[0], Statement::If { else_block: Some(_), .. }));
+            assert!(matches!(
+                &eb.statements[0],
+                Statement::If {
+                    else_block: Some(_),
+                    ..
+                }
+            ));
         } else {
             panic!("expected if with else-if");
         }
@@ -399,12 +452,15 @@ mod tests {
     fn test_dotdot_token() {
         let tokens = gbasic_lexer::tokenize("0..10");
         let kinds: Vec<_> = tokens.iter().map(|t| &t.token).collect();
-        assert_eq!(kinds, vec![
-            &gbasic_lexer::Token::Int(0),
-            &gbasic_lexer::Token::DotDot,
-            &gbasic_lexer::Token::Int(10),
-            &gbasic_lexer::Token::Eof,
-        ]);
+        assert_eq!(
+            kinds,
+            vec![
+                &gbasic_lexer::Token::Int(0),
+                &gbasic_lexer::Token::DotDot,
+                &gbasic_lexer::Token::Int(10),
+                &gbasic_lexer::Token::Eof,
+            ]
+        );
     }
 
     #[test]
@@ -422,7 +478,13 @@ mod tests {
     fn test_string_concat_parses() {
         let program = parse(r#"let s = "a" + "b""#).unwrap();
         if let Statement::Let { value, .. } = &program.statements[0] {
-            assert!(matches!(value, Expression::BinaryOp { op: BinaryOp::Add, .. }));
+            assert!(matches!(
+                value,
+                Expression::BinaryOp {
+                    op: BinaryOp::Add,
+                    ..
+                }
+            ));
         }
     }
 
@@ -434,7 +496,10 @@ mod tests {
                 assert!(matches!(target.as_ref(), Expression::Identifier(_)));
                 assert!(matches!(
                     value.as_ref(),
-                    Expression::BinaryOp { op: BinaryOp::Add, .. }
+                    Expression::BinaryOp {
+                        op: BinaryOp::Add,
+                        ..
+                    }
                 ));
             } else {
                 panic!("expected assignment");
@@ -449,7 +514,10 @@ mod tests {
             if let Expression::Assignment { value, .. } = expr {
                 assert!(matches!(
                     value.as_ref(),
-                    Expression::BinaryOp { op: BinaryOp::Sub, .. }
+                    Expression::BinaryOp {
+                        op: BinaryOp::Sub,
+                        ..
+                    }
                 ));
             } else {
                 panic!("expected assignment");
@@ -464,7 +532,10 @@ mod tests {
             if let Expression::Assignment { value, .. } = expr {
                 assert!(matches!(
                     value.as_ref(),
-                    Expression::BinaryOp { op: BinaryOp::Mul, .. }
+                    Expression::BinaryOp {
+                        op: BinaryOp::Mul,
+                        ..
+                    }
                 ));
             } else {
                 panic!("expected assignment");
@@ -479,7 +550,10 @@ mod tests {
             if let Expression::Assignment { value, .. } = expr {
                 assert!(matches!(
                     value.as_ref(),
-                    Expression::BinaryOp { op: BinaryOp::Div, .. }
+                    Expression::BinaryOp {
+                        op: BinaryOp::Div,
+                        ..
+                    }
                 ));
             } else {
                 panic!("expected assignment");

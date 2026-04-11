@@ -216,14 +216,22 @@ impl Parser {
                         let field_span = self.current_span();
                         self.advance();
                         // If expr is a MethodChain and next token is '(', append to chain
-                        if let Expression::MethodChain { base, mut chain, span: mc_span } = expr {
+                        if let Expression::MethodChain {
+                            base,
+                            mut chain,
+                            span: mc_span,
+                        } = expr
+                        {
                             if self.current() == &Token::LParen {
                                 self.advance();
                                 let args = self.parse_arg_list()?;
                                 let end = self.expect(&Token::RParen)?;
                                 let span = mc_span.merge(end);
                                 chain.push(MethodCall {
-                                    method: Identifier { name, span: field_span },
+                                    method: Identifier {
+                                        name,
+                                        span: field_span,
+                                    },
                                     args,
                                     span: field_span.merge(end),
                                 });
@@ -233,7 +241,10 @@ impl Parser {
                             // Property access on MethodChain (no parens) — also append
                             let span = mc_span.merge(field_span);
                             chain.push(MethodCall {
-                                method: Identifier { name, span: field_span },
+                                method: Identifier {
+                                    name,
+                                    span: field_span,
+                                },
                                 args: vec![],
                                 span: field_span,
                             });
@@ -313,10 +324,14 @@ impl Parser {
                     span,
                 }))
             }
-            Token::Screen | Token::Sound | Token::Input | Token::Math | Token::System
-            | Token::Memory | Token::IO | Token::Asset => {
-                self.parse_method_chain()
-            }
+            Token::Screen
+            | Token::Sound
+            | Token::Input
+            | Token::Math
+            | Token::System
+            | Token::Memory
+            | Token::IO
+            | Token::Asset => self.parse_method_chain(),
             Token::Ident(ref name) => {
                 let name = name.clone();
                 let span = self.current_span();
@@ -415,10 +430,14 @@ impl Parser {
                 // Parse the expression text as a sub-expression
                 let tokens = gbasic_lexer::tokenize(&expr_text);
                 let mut sub_parser = Parser::new(tokens);
-                let expr = sub_parser.parse_expression().map_err(|_| GBasicError::SyntaxError {
-                    message: format!("invalid expression in string interpolation: {{{expr_text}}}"),
-                    span,
-                })?;
+                let expr = sub_parser
+                    .parse_expression()
+                    .map_err(|_| GBasicError::SyntaxError {
+                        message: format!(
+                            "invalid expression in string interpolation: {{{expr_text}}}"
+                        ),
+                        span,
+                    })?;
                 parts.push(StringPart::Expr(expr));
             } else {
                 current.push(ch);

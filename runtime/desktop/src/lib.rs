@@ -70,6 +70,9 @@ thread_local! {
     static MEMORY_STORE: RefCell<HashMap<String, i64>> = RefCell::new(HashMap::new());
     static RNG_STATE: RefCell<u64> = RefCell::new(0);
     static SPRITE_HANDLES: RefCell<Vec<SpriteInfo>> = RefCell::new(Vec::new());
+    /// Cached GPU textures for sprites. Uses `'static` lifetime via `unsafe` transmute;
+    /// valid as long as `SdlState::texture_creator` is alive. Cleared before SDL shutdown.
+    static SPRITE_TEXTURES: RefCell<Vec<Option<sdl2::render::Texture<'static>>>> = RefCell::new(Vec::new());
     static OBJECTS: RefCell<Vec<GameObject>> = RefCell::new(Vec::new());
     static SCREEN_AUTO_INIT: Cell<bool> = const { Cell::new(false) };
     static DYN_ARRAYS: RefCell<Vec<Vec<i64>>> = RefCell::new(Vec::new());
@@ -87,11 +90,13 @@ struct SpriteInfo {
     x: f64,
     y: f64,
     scale: f64,
+    dirty: bool,
 }
 
 struct SdlState {
     canvas: sdl2::render::Canvas<sdl2::video::Window>,
     event_pump: sdl2::EventPump,
+    texture_creator: sdl2::render::TextureCreator<sdl2::video::WindowContext>,
     should_quit: bool,
     width: i64,
     height: i64,
@@ -138,12 +143,14 @@ pub extern "C" fn runtime_screen_init(width: i64, height: i64) {
         .present_vsync()
         .build()
         .expect("Failed to create canvas");
+    let texture_creator = canvas.texture_creator();
     let event_pump = sdl.event_pump().expect("Failed to get event pump");
 
     SDL_STATE.with(|state| {
         *state.borrow_mut() = Some(SdlState {
             canvas,
             event_pump,
+            texture_creator,
             should_quit: false,
             width,
             height,
@@ -173,12 +180,22 @@ pub extern "C" fn runtime_screen_set_pixel(x: i64, y: i64, r: i64, g: i64, b: i6
 pub extern "C" fn runtime_screen_draw_rect(x: i64, y: i64, w: i64, h: i64, r: i64, g: i64, b: i64) {
     with_sdl_mut(|s| {
         s.canvas.set_draw_color(rgb(r, g, b));
-        let _ = s.canvas.fill_rect(Rect::new(x as i32, y as i32, w as u32, h as u32));
+        let _ = s
+            .canvas
+            .fill_rect(Rect::new(x as i32, y as i32, w as u32, h as u32));
     });
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn runtime_screen_draw_line(x1: i64, y1: i64, x2: i64, y2: i64, r: i64, g: i64, b: i64) {
+pub extern "C" fn runtime_screen_draw_line(
+    x1: i64,
+    y1: i64,
+    x2: i64,
+    y2: i64,
+    r: i64,
+    g: i64,
+    b: i64,
+) {
     with_sdl_mut(|s| {
         s.canvas.set_draw_color(rgb(r, g, b));
         let _ = s.canvas.draw_line(
@@ -197,16 +214,12 @@ pub extern "C" fn runtime_screen_present() {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn runtime_screen_width() -> i64 {
-    SDL_STATE.with(|state| {
-        state.borrow().as_ref().map(|s| s.width).unwrap_or(0)
-    })
+    SDL_STATE.with(|state| state.borrow().as_ref().map(|s| s.width).unwrap_or(0))
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn runtime_screen_height() -> i64 {
-    SDL_STATE.with(|state| {
-        state.borrow().as_ref().map(|s| s.height).unwrap_or(0)
-    })
+    SDL_STATE.with(|state| state.borrow().as_ref().map(|s| s.height).unwrap_or(0))
 }
 
 // ─── Input namespace ───
@@ -219,12 +232,16 @@ pub extern "C" fn runtime_input_poll() {
                 Event::Quit { .. } => {
                     s.should_quit = true;
                 }
-                Event::KeyDown { keycode: Some(k), .. } => {
+                Event::KeyDown {
+                    keycode: Some(k), ..
+                } => {
                     KEY_STATE.with(|ks| {
                         ks.borrow_mut().insert(k.name().to_lowercase(), true);
                     });
                 }
-                Event::KeyUp { keycode: Some(k), .. } => {
+                Event::KeyUp {
+                    keycode: Some(k), ..
+                } => {
                     KEY_STATE.with(|ks| {
                         ks.borrow_mut().insert(k.name().to_lowercase(), false);
                     });
@@ -237,10 +254,14 @@ pub extern "C" fn runtime_input_poll() {
                     });
                 }
                 Event::MouseButtonDown { .. } => {
-                    MOUSE_STATE.with(|ms| { ms.borrow_mut().2 = true; });
+                    MOUSE_STATE.with(|ms| {
+                        ms.borrow_mut().2 = true;
+                    });
                 }
                 Event::MouseButtonUp { .. } => {
-                    MOUSE_STATE.with(|ms| { ms.borrow_mut().2 = false; });
+                    MOUSE_STATE.with(|ms| {
+                        ms.borrow_mut().2 = false;
+                    });
                 }
                 _ => {}
             }
@@ -255,7 +276,11 @@ pub extern "C" fn runtime_input_key_pressed(key: *const std::ffi::c_char) -> i64
         None => return 0,
     };
     KEY_STATE.with(|ks| {
-        if *ks.borrow().get(&name).unwrap_or(&false) { 1 } else { 0 }
+        if *ks.borrow().get(&name).unwrap_or(&false) {
+            1
+        } else {
+            0
+        }
     })
 }
 
@@ -277,31 +302,49 @@ pub extern "C" fn runtime_input_mouse_clicked() -> i64 {
 // ─── Math namespace ───
 
 #[unsafe(no_mangle)]
-pub extern "C" fn runtime_math_sin(x: f64) -> f64 { x.sin() }
+pub extern "C" fn runtime_math_sin(x: f64) -> f64 {
+    x.sin()
+}
 
 #[unsafe(no_mangle)]
-pub extern "C" fn runtime_math_cos(x: f64) -> f64 { x.cos() }
+pub extern "C" fn runtime_math_cos(x: f64) -> f64 {
+    x.cos()
+}
 
 #[unsafe(no_mangle)]
-pub extern "C" fn runtime_math_sqrt(x: f64) -> f64 { x.sqrt() }
+pub extern "C" fn runtime_math_sqrt(x: f64) -> f64 {
+    x.sqrt()
+}
 
 #[unsafe(no_mangle)]
-pub extern "C" fn runtime_math_abs(x: f64) -> f64 { x.abs() }
+pub extern "C" fn runtime_math_abs(x: f64) -> f64 {
+    x.abs()
+}
 
 #[unsafe(no_mangle)]
-pub extern "C" fn runtime_math_floor(x: f64) -> f64 { x.floor() }
+pub extern "C" fn runtime_math_floor(x: f64) -> f64 {
+    x.floor()
+}
 
 #[unsafe(no_mangle)]
-pub extern "C" fn runtime_math_ceil(x: f64) -> f64 { x.ceil() }
+pub extern "C" fn runtime_math_ceil(x: f64) -> f64 {
+    x.ceil()
+}
 
 #[unsafe(no_mangle)]
-pub extern "C" fn runtime_math_pow(x: f64, y: f64) -> f64 { x.powf(y) }
+pub extern "C" fn runtime_math_pow(x: f64, y: f64) -> f64 {
+    x.powf(y)
+}
 
 #[unsafe(no_mangle)]
-pub extern "C" fn runtime_math_max(a: f64, b: f64) -> f64 { a.max(b) }
+pub extern "C" fn runtime_math_max(a: f64, b: f64) -> f64 {
+    a.max(b)
+}
 
 #[unsafe(no_mangle)]
-pub extern "C" fn runtime_math_min(a: f64, b: f64) -> f64 { a.min(b) }
+pub extern "C" fn runtime_math_min(a: f64, b: f64) -> f64 {
+    a.min(b)
+}
 
 #[unsafe(no_mangle)]
 pub extern "C" fn runtime_math_random() -> f64 {
@@ -313,7 +356,9 @@ pub extern "C" fn runtime_math_random() -> f64 {
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.as_nanos() as u64)
                 .unwrap_or(0xdeadbeef_cafebabe);
-            if *state == 0 { *state = 0xdeadbeef_cafebabe; }
+            if *state == 0 {
+                *state = 0xdeadbeef_cafebabe;
+            }
         }
         // xorshift64
         let mut x = *state;
@@ -326,7 +371,9 @@ pub extern "C" fn runtime_math_random() -> f64 {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn runtime_math_pi() -> f64 { std::f64::consts::PI }
+pub extern "C" fn runtime_math_pi() -> f64 {
+    std::f64::consts::PI
+}
 
 #[unsafe(no_mangle)]
 pub extern "C" fn runtime_math_clamp(v: f64, lo: f64, hi: f64) -> f64 {
@@ -390,9 +437,7 @@ pub extern "C" fn runtime_system_frame_end() {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn runtime_system_frame_time() -> f64 {
-    SDL_STATE.with(|state| {
-        state.borrow().as_ref().map(|s| s.delta_time).unwrap_or(0.0)
-    })
+    SDL_STATE.with(|state| state.borrow().as_ref().map(|s| s.delta_time).unwrap_or(0.0))
 }
 
 // ─── Sprite functions ───
@@ -422,6 +467,10 @@ pub extern "C" fn runtime_screen_sprite_load(path: *const std::ffi::c_char) -> i
             x: 0.0,
             y: 0.0,
             scale: 1.0,
+            dirty: true,
+        });
+        SPRITE_TEXTURES.with(|textures| {
+            textures.borrow_mut().push(None);
         });
         handle
     })
@@ -452,30 +501,74 @@ pub extern "C" fn runtime_screen_sprite_scale(handle: i64, scale: f64) -> i64 {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn runtime_screen_sprite_draw(handle: i64) {
-    SPRITE_HANDLES.with(|sprites| {
-        let sprites = sprites.borrow();
-        if let Some(info) = sprites.get(handle as usize) {
-            let w = (info.width as f64 * info.scale) as u32;
-            let h = (info.height as f64 * info.scale) as u32;
-            let x = info.x as i32;
-            let y = info.y as i32;
-            let mut data = info.surface_data.clone();
-            let width = info.width;
-            let height = info.height;
-            let pitch = info.pitch;
-            with_sdl_mut(move |s| {
-                if let Ok(surface) = sdl2::surface::Surface::from_data(
-                    &mut data,
-                    width,
-                    height,
-                    pitch,
-                    sdl2::pixels::PixelFormatEnum::RGB24,
-                ) {
-                    let tc = s.canvas.texture_creator();
-                    if let Ok(texture) = tc.create_texture_from_surface(&surface) {
-                        let _ = s.canvas.copy(&texture, None, Rect::new(x, y, w, h));
+    let idx = handle as usize;
+
+    // 1. Read sprite geometry (short-lived immutable borrow).
+    let (x, y, w, h, needs_rebuild) = {
+        let sprites = SPRITE_HANDLES.with(|s| {
+            let sprites = s.borrow();
+            sprites.get(idx).map(|info| {
+                let w = (info.width as f64 * info.scale) as u32;
+                let h = (info.height as f64 * info.scale) as u32;
+                let needs = info.dirty
+                    || SPRITE_TEXTURES.with(|t| {
+                        let tex = t.borrow();
+                        tex.get(idx).map(|t| t.is_none()).unwrap_or(true)
+                    });
+                (info.x as i32, info.y as i32, w, h, needs)
+            })
+        });
+        match sprites {
+            Some(v) => v,
+            None => return,
+        }
+    };
+
+    // 2. Rebuild the cached GPU texture when needed (first draw or after data change).
+    if needs_rebuild {
+        SPRITE_HANDLES.with(|sprites| {
+            let mut sprites = sprites.borrow_mut();
+            if let Some(info) = sprites.get_mut(idx) {
+                SDL_STATE.with(|state| {
+                    let borrow = state.borrow();
+                    if let Some(sdl) = borrow.as_ref() {
+                        if let Ok(surface) = sdl2::surface::Surface::from_data(
+                            &mut info.surface_data,
+                            info.width,
+                            info.height,
+                            info.pitch,
+                            sdl2::pixels::PixelFormatEnum::RGB24,
+                        ) {
+                            if let Ok(texture) =
+                                sdl.texture_creator.create_texture_from_surface(&surface)
+                            {
+                                // SAFETY: The texture is valid as long as
+                                // `SdlState::texture_creator` lives. We clear
+                                // SPRITE_TEXTURES before dropping SdlState in
+                                // `runtime_shutdown`.
+                                let texture: sdl2::render::Texture<'static> =
+                                    unsafe { std::mem::transmute(texture) };
+                                SPRITE_TEXTURES.with(|t| {
+                                    let mut textures = t.borrow_mut();
+                                    if let Some(slot) = textures.get_mut(idx) {
+                                        *slot = Some(texture);
+                                    }
+                                });
+                            }
+                        }
+                        info.dirty = false;
                     }
-                }
+                });
+            }
+        });
+    }
+
+    // 3. Draw with the cached texture (no clone, no GPU upload).
+    SPRITE_TEXTURES.with(|t| {
+        let textures = t.borrow();
+        if let Some(Some(texture)) = textures.get(idx) {
+            with_sdl_mut(|s| {
+                let _ = s.canvas.copy(texture, None, Rect::new(x, y, w, h));
             });
         }
     });
@@ -484,7 +577,14 @@ pub extern "C" fn runtime_screen_sprite_draw(handle: i64) {
 // ─── Draw circle (midpoint algorithm) ───
 
 #[unsafe(no_mangle)]
-pub extern "C" fn runtime_screen_draw_circle(cx: i64, cy: i64, radius: i64, r: i64, g: i64, b: i64) {
+pub extern "C" fn runtime_screen_draw_circle(
+    cx: i64,
+    cy: i64,
+    radius: i64,
+    r: i64,
+    g: i64,
+    b: i64,
+) {
     with_sdl_mut(|s| {
         s.canvas.set_draw_color(rgb(r, g, b));
         let cx = cx as i32;
@@ -493,10 +593,18 @@ pub extern "C" fn runtime_screen_draw_circle(cx: i64, cy: i64, radius: i64, r: i
         let mut y = 0i32;
         let mut d = 1 - x;
         while x >= y {
-            let _ = s.canvas.draw_line(Point::new(cx - x, cy + y), Point::new(cx + x, cy + y));
-            let _ = s.canvas.draw_line(Point::new(cx - x, cy - y), Point::new(cx + x, cy - y));
-            let _ = s.canvas.draw_line(Point::new(cx - y, cy + x), Point::new(cx + y, cy + x));
-            let _ = s.canvas.draw_line(Point::new(cx - y, cy - x), Point::new(cx + y, cy - x));
+            let _ = s
+                .canvas
+                .draw_line(Point::new(cx - x, cy + y), Point::new(cx + x, cy + y));
+            let _ = s
+                .canvas
+                .draw_line(Point::new(cx - x, cy - y), Point::new(cx + x, cy - y));
+            let _ = s
+                .canvas
+                .draw_line(Point::new(cx - y, cy + x), Point::new(cx + y, cy + x));
+            let _ = s
+                .canvas
+                .draw_line(Point::new(cx - y, cy - x), Point::new(cx + y, cy - x));
             y += 1;
             if d <= 0 {
                 d += 2 * y + 1;
@@ -567,8 +675,14 @@ mod sound_mixer {
                 return 1;
             }
             match mixer::Chunk::from_file(p) {
-                Ok(chunk) => { chunks.insert(p.to_string(), chunk); 1 }
-                Err(e) => { eprintln!("[sound] failed to load \"{p}\": {e}"); 0 }
+                Ok(chunk) => {
+                    chunks.insert(p.to_string(), chunk);
+                    1
+                }
+                Err(e) => {
+                    eprintln!("[sound] failed to load \"{p}\": {e}");
+                    0
+                }
             }
         })
     }
@@ -613,33 +727,53 @@ mod sound_mixer {
 #[unsafe(no_mangle)]
 pub extern "C" fn runtime_sound_beep(freq: i64, dur: i64) {
     #[cfg(feature = "mixer")]
-    { sound_mixer::beep(freq, dur); }
+    {
+        sound_mixer::beep(freq, dur);
+    }
     #[cfg(not(feature = "mixer"))]
-    { eprintln!("[sound] beep freq={freq} dur={dur}ms (enable 'mixer' feature for real audio)"); }
+    {
+        eprintln!("[sound] beep freq={freq} dur={dur}ms (enable 'mixer' feature for real audio)");
+    }
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn runtime_sound_effect_load(path: *const std::ffi::c_char) -> i64 {
     #[cfg(feature = "mixer")]
-    { return sound_mixer::effect_load(path); }
+    {
+        return sound_mixer::effect_load(path);
+    }
     #[cfg(not(feature = "mixer"))]
-    { let p = unsafe { read_cstr(path) }.unwrap_or("?"); eprintln!("[sound] effect_load(\"{p}\") (enable 'mixer' feature for real audio)"); 1 }
+    {
+        let p = unsafe { read_cstr(path) }.unwrap_or("?");
+        eprintln!("[sound] effect_load(\"{p}\") (enable 'mixer' feature for real audio)");
+        1
+    }
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn runtime_sound_effect_play(path: *const std::ffi::c_char) {
     #[cfg(feature = "mixer")]
-    { sound_mixer::effect_play(path); }
+    {
+        sound_mixer::effect_play(path);
+    }
     #[cfg(not(feature = "mixer"))]
-    { let p = unsafe { read_cstr(path) }.unwrap_or("?"); eprintln!("[sound] effect_play(\"{p}\") (stub)"); }
+    {
+        let p = unsafe { read_cstr(path) }.unwrap_or("?");
+        eprintln!("[sound] effect_play(\"{p}\") (stub)");
+    }
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn runtime_sound_effect_volume(path: *const std::ffi::c_char, volume: f64) {
     #[cfg(feature = "mixer")]
-    { sound_mixer::effect_volume(path, volume); }
+    {
+        sound_mixer::effect_volume(path, volume);
+    }
     #[cfg(not(feature = "mixer"))]
-    { let p = unsafe { read_cstr(path) }.unwrap_or("?"); eprintln!("[sound] effect_volume(\"{p}\", {volume}) (stub)"); }
+    {
+        let p = unsafe { read_cstr(path) }.unwrap_or("?");
+        eprintln!("[sound] effect_volume(\"{p}\", {volume}) (stub)");
+    }
 }
 
 // ─── Asset namespace ───
@@ -687,7 +821,10 @@ pub extern "C" fn runtime_io_read_file(path: *const std::ffi::c_char) -> *const 
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn runtime_io_write_file(path: *const std::ffi::c_char, data: *const std::ffi::c_char) {
+pub extern "C" fn runtime_io_write_file(
+    path: *const std::ffi::c_char,
+    data: *const std::ffi::c_char,
+) {
     if let (Some(p), Some(d)) = (unsafe { read_cstr(path) }, unsafe { read_cstr(data) }) {
         let _ = std::fs::write(p, d);
     }
@@ -706,6 +843,13 @@ pub extern "C" fn runtime_string_concat(
     // Intentionally leaks — no GC in week 1
     let c = CString::new(result).unwrap_or_default();
     c.into_raw() as *const _
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn runtime_string_eq(a: *const std::ffi::c_char, b: *const std::ffi::c_char) -> i64 {
+    let sa = unsafe { read_cstr(a) }.unwrap_or("");
+    let sb = unsafe { read_cstr(b) }.unwrap_or("");
+    if sa == sb { 1 } else { 0 }
 }
 
 // ─── Legacy functions (kept for backward compat) ───
@@ -728,7 +872,11 @@ pub extern "C" fn runtime_present() {
 #[unsafe(no_mangle)]
 pub extern "C" fn runtime_should_quit() -> i32 {
     SDL_STATE.with(|state| {
-        state.borrow().as_ref().map(|s| if s.should_quit { 1 } else { 0 }).unwrap_or(1)
+        state
+            .borrow()
+            .as_ref()
+            .map(|s| if s.should_quit { 1 } else { 0 })
+            .unwrap_or(1)
     })
 }
 
@@ -774,6 +922,9 @@ pub extern "C" fn runtime_print_newline() {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn runtime_shutdown() {
+    // Drop cached GPU textures *before* the TextureCreator they reference.
+    SPRITE_TEXTURES.with(|t| t.borrow_mut().clear());
+    SPRITE_HANDLES.with(|s| s.borrow_mut().clear());
     SDL_STATE.with(|state| {
         *state.borrow_mut() = None;
     });
@@ -845,17 +996,24 @@ fn with_object<R: Default>(handle: i64, f: impl FnOnce(&GameObject) -> R) -> R {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn runtime_set_position(handle: i64, x: f64, y: f64) {
-    with_object_mut(handle, |o| { o.x = x; o.y = y; });
+    with_object_mut(handle, |o| {
+        o.x = x;
+        o.y = y;
+    });
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn runtime_set_position_x(handle: i64, x: f64) {
-    with_object_mut(handle, |o| { o.x = x; });
+    with_object_mut(handle, |o| {
+        o.x = x;
+    });
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn runtime_set_position_y(handle: i64, y: f64) {
-    with_object_mut(handle, |o| { o.y = y; });
+    with_object_mut(handle, |o| {
+        o.y = y;
+    });
 }
 
 #[unsafe(no_mangle)]
@@ -869,42 +1027,59 @@ pub extern "C" fn runtime_set_color(handle: i64, r: i64, g: i64, b: i64) {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn runtime_set_visible(handle: i64, v: i64) {
-    with_object_mut(handle, |o| { o.visible = v != 0; });
+    with_object_mut(handle, |o| {
+        o.visible = v != 0;
+    });
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn runtime_set_velocity(handle: i64, vx: f64, vy: f64) {
-    with_object_mut(handle, |o| { o.vx = vx; o.vy = vy; });
+    with_object_mut(handle, |o| {
+        o.vx = vx;
+        o.vy = vy;
+    });
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn runtime_set_velocity_x(handle: i64, vx: f64) {
-    with_object_mut(handle, |o| { o.vx = vx; });
+    with_object_mut(handle, |o| {
+        o.vx = vx;
+    });
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn runtime_set_velocity_y(handle: i64, vy: f64) {
-    with_object_mut(handle, |o| { o.vy = vy; });
+    with_object_mut(handle, |o| {
+        o.vy = vy;
+    });
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn runtime_set_gravity(handle: i64, g: f64) {
-    with_object_mut(handle, |o| { o.gravity = g; });
+    with_object_mut(handle, |o| {
+        o.gravity = g;
+    });
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn runtime_set_solid(handle: i64, v: i64) {
-    with_object_mut(handle, |o| { o.solid = v != 0; });
+    with_object_mut(handle, |o| {
+        o.solid = v != 0;
+    });
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn runtime_set_bounces(handle: i64, v: i64) {
-    with_object_mut(handle, |o| { o.bounces = v != 0; });
+    with_object_mut(handle, |o| {
+        o.bounces = v != 0;
+    });
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn runtime_set_layer(handle: i64, l: i64) {
-    with_object_mut(handle, |o| { o.layer = l; });
+    with_object_mut(handle, |o| {
+        o.layer = l;
+    });
 }
 
 // ─── Property getters ───
@@ -943,7 +1118,10 @@ pub extern "C" fn runtime_get_size_height(handle: i64) -> f64 {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn runtime_object_move(handle: i64, dx: f64, dy: f64) {
-    with_object_mut(handle, |o| { o.x += dx; o.y += dy; });
+    with_object_mut(handle, |o| {
+        o.x += dx;
+        o.y += dy;
+    });
 }
 
 #[unsafe(no_mangle)]
@@ -961,7 +1139,11 @@ pub extern "C" fn runtime_object_collides(h1: i64, h2: i64) -> i64 {
         // AABB collision
         let (ax1, ay1, ax2, ay2) = obj_bounds(a);
         let (bx1, by1, bx2, by2) = obj_bounds(b);
-        if ax1 < bx2 && ax2 > bx1 && ay1 < by2 && ay2 > by1 { 1 } else { 0 }
+        if ax1 < bx2 && ax2 > bx1 && ay1 < by2 && ay2 > by1 {
+            1
+        } else {
+            0
+        }
     })
 }
 
@@ -979,13 +1161,19 @@ fn obj_bounds(o: &GameObject) -> (f64, f64, f64, f64) {
 pub extern "C" fn runtime_object_contains(handle: i64, x: f64, y: f64) -> i64 {
     with_object(handle, |o| {
         let (x1, y1, x2, y2) = obj_bounds(o);
-        if x >= x1 && x <= x2 && y >= y1 && y <= y2 { 1 } else { 0 }
+        if x >= x1 && x <= x2 && y >= y1 && y <= y2 {
+            1
+        } else {
+            0
+        }
     })
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn runtime_object_remove(handle: i64) {
-    with_object_mut(handle, |o| { o.alive = false; });
+    with_object_mut(handle, |o| {
+        o.alive = false;
+    });
 }
 
 // ─── Physics step ───
@@ -993,7 +1181,11 @@ pub extern "C" fn runtime_object_remove(handle: i64) {
 #[unsafe(no_mangle)]
 pub extern "C" fn runtime_physics_step() {
     let (screen_w, screen_h) = SDL_STATE.with(|state| {
-        state.borrow().as_ref().map(|s| (s.width as f64, s.height as f64)).unwrap_or((800.0, 600.0))
+        state
+            .borrow()
+            .as_ref()
+            .map(|s| (s.width as f64, s.height as f64))
+            .unwrap_or((800.0, 600.0))
     });
 
     OBJECTS.with(|objs| {
@@ -1095,12 +1287,9 @@ pub extern "C" fn runtime_auto_draw() {
                 ObjectKind::Rect => {
                     with_sdl_mut(|s| {
                         s.canvas.set_draw_color(c);
-                        let _ = s.canvas.fill_rect(Rect::new(
-                            o.x as i32,
-                            o.y as i32,
-                            o.w as u32,
-                            o.h as u32,
-                        ));
+                        let _ = s
+                            .canvas
+                            .fill_rect(Rect::new(o.x as i32, o.y as i32, o.w as u32, o.h as u32));
                     });
                 }
                 ObjectKind::Circle => {
@@ -1113,10 +1302,22 @@ pub extern "C" fn runtime_auto_draw() {
                         let mut py = 0i32;
                         let mut d = 1 - px;
                         while px >= py {
-                            let _ = s.canvas.draw_line(Point::new(cx - px, cy + py), Point::new(cx + px, cy + py));
-                            let _ = s.canvas.draw_line(Point::new(cx - px, cy - py), Point::new(cx + px, cy - py));
-                            let _ = s.canvas.draw_line(Point::new(cx - py, cy + px), Point::new(cx + py, cy + px));
-                            let _ = s.canvas.draw_line(Point::new(cx - py, cy - px), Point::new(cx + py, cy - px));
+                            let _ = s.canvas.draw_line(
+                                Point::new(cx - px, cy + py),
+                                Point::new(cx + px, cy + py),
+                            );
+                            let _ = s.canvas.draw_line(
+                                Point::new(cx - px, cy - py),
+                                Point::new(cx + px, cy - py),
+                            );
+                            let _ = s.canvas.draw_line(
+                                Point::new(cx - py, cy + px),
+                                Point::new(cx + py, cy + px),
+                            );
+                            let _ = s.canvas.draw_line(
+                                Point::new(cx - py, cy - px),
+                                Point::new(cx + py, cy - px),
+                            );
                             py += 1;
                             if d <= 0 {
                                 d += 2 * py + 1;
@@ -1140,7 +1341,11 @@ pub extern "C" fn runtime_frame_auto() {
     runtime_input_poll();
     // 2. Check for quit
     let should_quit = SDL_STATE.with(|state| {
-        state.borrow().as_ref().map(|s| s.should_quit).unwrap_or(false)
+        state
+            .borrow()
+            .as_ref()
+            .map(|s| s.should_quit)
+            .unwrap_or(false)
     });
     if should_quit {
         std::process::exit(0);
@@ -1172,14 +1377,22 @@ pub extern "C" fn runtime_frame_auto_end() {
 #[unsafe(no_mangle)]
 pub extern "C" fn runtime_screen_center_x() -> f64 {
     SDL_STATE.with(|state| {
-        state.borrow().as_ref().map(|s| s.width as f64 / 2.0).unwrap_or(400.0)
+        state
+            .borrow()
+            .as_ref()
+            .map(|s| s.width as f64 / 2.0)
+            .unwrap_or(400.0)
     })
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn runtime_screen_center_y() -> f64 {
     SDL_STATE.with(|state| {
-        state.borrow().as_ref().map(|s| s.height as f64 / 2.0).unwrap_or(300.0)
+        state
+            .borrow()
+            .as_ref()
+            .map(|s| s.height as f64 / 2.0)
+            .unwrap_or(300.0)
     })
 }
 
@@ -1197,7 +1410,9 @@ pub extern "C" fn runtime_math_random_range(min: i64, max: i64) -> i64 {
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.as_nanos() as u64)
                 .unwrap_or(0xdeadbeef_cafebabe);
-            if *state == 0 { *state = 0xdeadbeef_cafebabe; }
+            if *state == 0 {
+                *state = 0xdeadbeef_cafebabe;
+            }
         }
         let mut x = *state;
         x ^= x << 13;
@@ -1258,7 +1473,9 @@ pub extern "C" fn runtime_array_add(handle: i64, value: i64) {
 pub extern "C" fn runtime_array_length(handle: i64) -> i64 {
     DYN_ARRAYS.with(|arrs| {
         let arrs = arrs.borrow();
-        arrs.get(handle as usize).map(|a| a.len() as i64).unwrap_or(0)
+        arrs.get(handle as usize)
+            .map(|a| a.len() as i64)
+            .unwrap_or(0)
     })
 }
 
@@ -1288,7 +1505,14 @@ pub extern "C" fn runtime_array_remove_value(handle: i64, value: i64) {
 // ─── Text drawing (simple bitmap font) ───
 
 #[unsafe(no_mangle)]
-pub extern "C" fn runtime_draw_text(text: *const std::ffi::c_char, x: i64, y: i64, r: i64, g: i64, b: i64) {
+pub extern "C" fn runtime_draw_text(
+    text: *const std::ffi::c_char,
+    x: i64,
+    y: i64,
+    r: i64,
+    g: i64,
+    b: i64,
+) {
     let s = match unsafe { read_cstr(text) } {
         Some(s) => s,
         None => return,
@@ -1303,7 +1527,12 @@ pub extern "C" fn runtime_draw_text(text: *const std::ffi::c_char, x: i64, y: i6
             for row in 0..7 {
                 for col in 0..5 {
                     if bitmap[row] & (1 << (4 - col)) != 0 {
-                        let _ = state.canvas.fill_rect(Rect::new(cx + col * 2, cy + row as i32 * 2, 2, 2));
+                        let _ = state.canvas.fill_rect(Rect::new(
+                            cx + col * 2,
+                            cy + row as i32 * 2,
+                            2,
+                            2,
+                        ));
                     }
                 }
             }

@@ -4,12 +4,12 @@
 //! Run: cargo run --example poc_desktop -p gbasic-irgen
 //! Then: ./poc_desktop
 
+use inkwell::OptimizationLevel;
 use inkwell::context::Context;
 use inkwell::module::Module;
 use inkwell::targets::{
     CodeModel, FileType, InitializationConfig, RelocMode, Target, TargetMachine,
 };
-use inkwell::OptimizationLevel;
 use std::path::Path;
 use std::process::Command;
 
@@ -25,10 +25,7 @@ fn build_module(context: &Context) -> Module<'_> {
     let init_fn_type = void_type.fn_type(&[i32_type.into(), i32_type.into()], false);
     let init_fn = module.add_function("runtime_init", init_fn_type, None);
 
-    let clear_fn_type = void_type.fn_type(
-        &[i8_type.into(), i8_type.into(), i8_type.into()],
-        false,
-    );
+    let clear_fn_type = void_type.fn_type(&[i8_type.into(), i8_type.into(), i8_type.into()], false);
     let clear_fn = module.add_function("runtime_clear_screen", clear_fn_type, None);
 
     let present_fn_type = void_type.fn_type(&[], false);
@@ -50,24 +47,31 @@ fn build_module(context: &Context) -> Module<'_> {
 
     // Entry: call runtime_init(800, 600)
     builder.position_at_end(entry_bb);
-    builder.build_call(
-        init_fn,
-        &[i32_type.const_int(800, false).into(), i32_type.const_int(600, false).into()],
-        "",
-    ).unwrap();
+    builder
+        .build_call(
+            init_fn,
+            &[
+                i32_type.const_int(800, false).into(),
+                i32_type.const_int(600, false).into(),
+            ],
+            "",
+        )
+        .unwrap();
     builder.build_unconditional_branch(loop_bb).unwrap();
 
     // Loop: clear blue, present, check quit
     builder.position_at_end(loop_bb);
-    builder.build_call(
-        clear_fn,
-        &[
-            i8_type.const_int(30, false).into(),  // R
-            i8_type.const_int(60, false).into(),  // G
-            i8_type.const_int(180, false).into(), // B
-        ],
-        "",
-    ).unwrap();
+    builder
+        .build_call(
+            clear_fn,
+            &[
+                i8_type.const_int(30, false).into(),  // R
+                i8_type.const_int(60, false).into(),  // G
+                i8_type.const_int(180, false).into(), // B
+            ],
+            "",
+        )
+        .unwrap();
     builder.build_call(present_fn, &[], "").unwrap();
 
     let should_quit = builder
@@ -87,12 +91,16 @@ fn build_module(context: &Context) -> Module<'_> {
         )
         .unwrap();
 
-    builder.build_conditional_branch(cmp, exit_bb, loop_bb).unwrap();
+    builder
+        .build_conditional_branch(cmp, exit_bb, loop_bb)
+        .unwrap();
 
     // Exit: shutdown and return 0
     builder.position_at_end(exit_bb);
     builder.build_call(shutdown_fn, &[], "").unwrap();
-    builder.build_return(Some(&i32_type.const_int(0, false))).unwrap();
+    builder
+        .build_return(Some(&i32_type.const_int(0, false)))
+        .unwrap();
 
     module
 }
@@ -163,7 +171,8 @@ fn main() {
         }
     }
 
-    let sdl2_dir = sdl2_lib_dir.expect("Could not find bundled SDL2 library. Build runtime/desktop first.");
+    let sdl2_dir =
+        sdl2_lib_dir.expect("Could not find bundled SDL2 library. Build runtime/desktop first.");
     println!("SDL2 bundled lib dir: {}", sdl2_dir.display());
 
     let mut cmd = Command::new("cc");
@@ -173,16 +182,26 @@ fn main() {
         .arg(runtime_lib.to_str().unwrap())
         .arg(format!("-L{}", sdl2_dir.display()))
         .arg("-lSDL2")
-        .arg("-framework").arg("Cocoa")
-        .arg("-framework").arg("IOKit")
-        .arg("-framework").arg("CoreVideo")
-        .arg("-framework").arg("CoreAudio")
-        .arg("-framework").arg("AudioToolbox")
-        .arg("-framework").arg("Carbon")
-        .arg("-framework").arg("ForceFeedback")
-        .arg("-framework").arg("GameController")
-        .arg("-framework").arg("CoreHaptics")
-        .arg("-framework").arg("Metal")
+        .arg("-framework")
+        .arg("Cocoa")
+        .arg("-framework")
+        .arg("IOKit")
+        .arg("-framework")
+        .arg("CoreVideo")
+        .arg("-framework")
+        .arg("CoreAudio")
+        .arg("-framework")
+        .arg("AudioToolbox")
+        .arg("-framework")
+        .arg("Carbon")
+        .arg("-framework")
+        .arg("ForceFeedback")
+        .arg("-framework")
+        .arg("GameController")
+        .arg("-framework")
+        .arg("CoreHaptics")
+        .arg("-framework")
+        .arg("Metal")
         .arg("-liconv");
 
     println!("Linking: {:?}", cmd);

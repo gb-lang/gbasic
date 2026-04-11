@@ -70,6 +70,9 @@ thread_local! {
     static MEMORY_STORE: RefCell<HashMap<String, i64>> = RefCell::new(HashMap::new());
     static RNG_STATE: RefCell<u64> = RefCell::new(0);
     static SPRITE_HANDLES: RefCell<Vec<SpriteInfo>> = RefCell::new(Vec::new());
+    /// Cached GPU textures for sprites. Uses `'static` lifetime via `unsafe` transmute;
+    /// valid as long as `SdlState::texture_creator` is alive. Cleared before SDL shutdown.
+    static SPRITE_TEXTURES: RefCell<Vec<Option<sdl2::render::Texture<'static>>>> = RefCell::new(Vec::new());
     static OBJECTS: RefCell<Vec<GameObject>> = RefCell::new(Vec::new());
     static SCREEN_AUTO_INIT: Cell<bool> = const { Cell::new(false) };
     static DYN_ARRAYS: RefCell<Vec<Vec<i64>>> = RefCell::new(Vec::new());
@@ -87,11 +90,13 @@ struct SpriteInfo {
     x: f64,
     y: f64,
     scale: f64,
+    dirty: bool,
 }
 
 struct SdlState {
     canvas: sdl2::render::Canvas<sdl2::video::Window>,
     event_pump: sdl2::EventPump,
+    texture_creator: sdl2::render::TextureCreator<sdl2::video::WindowContext>,
     should_quit: bool,
     width: i64,
     height: i64,
@@ -138,12 +143,14 @@ pub extern "C" fn runtime_screen_init(width: i64, height: i64) {
         .present_vsync()
         .build()
         .expect("Failed to create canvas");
+    let texture_creator = canvas.texture_creator();
     let event_pump = sdl.event_pump().expect("Failed to get event pump");
 
     SDL_STATE.with(|state| {
         *state.borrow_mut() = Some(SdlState {
             canvas,
             event_pump,
+            texture_creator,
             should_quit: false,
             width,
             height,
@@ -422,6 +429,10 @@ pub extern "C" fn runtime_screen_sprite_load(path: *const std::ffi::c_char) -> i
             x: 0.0,
             y: 0.0,
             scale: 1.0,
+            dirty: true,
+        });
+        SPRITE_TEXTURES.with(|textures| {
+            textures.borrow_mut().push(None);
         });
         handle
     })
@@ -452,30 +463,71 @@ pub extern "C" fn runtime_screen_sprite_scale(handle: i64, scale: f64) -> i64 {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn runtime_screen_sprite_draw(handle: i64) {
-    SPRITE_HANDLES.with(|sprites| {
-        let sprites = sprites.borrow();
-        if let Some(info) = sprites.get(handle as usize) {
-            let w = (info.width as f64 * info.scale) as u32;
-            let h = (info.height as f64 * info.scale) as u32;
-            let x = info.x as i32;
-            let y = info.y as i32;
-            let mut data = info.surface_data.clone();
-            let width = info.width;
-            let height = info.height;
-            let pitch = info.pitch;
-            with_sdl_mut(move |s| {
-                if let Ok(surface) = sdl2::surface::Surface::from_data(
-                    &mut data,
-                    width,
-                    height,
-                    pitch,
-                    sdl2::pixels::PixelFormatEnum::RGB24,
-                ) {
-                    let tc = s.canvas.texture_creator();
-                    if let Ok(texture) = tc.create_texture_from_surface(&surface) {
-                        let _ = s.canvas.copy(&texture, None, Rect::new(x, y, w, h));
+    let idx = handle as usize;
+
+    // 1. Read sprite geometry (short-lived immutable borrow).
+    let (x, y, w, h, needs_rebuild) = {
+        let sprites = SPRITE_HANDLES.with(|s| {
+            let sprites = s.borrow();
+            sprites.get(idx).map(|info| {
+                let w = (info.width as f64 * info.scale) as u32;
+                let h = (info.height as f64 * info.scale) as u32;
+                let needs = info.dirty || SPRITE_TEXTURES.with(|t| {
+                    let tex = t.borrow();
+                    tex.get(idx).map(|t| t.is_none()).unwrap_or(true)
+                });
+                (info.x as i32, info.y as i32, w, h, needs)
+            })
+        });
+        match sprites {
+            Some(v) => v,
+            None => return,
+        }
+    };
+
+    // 2. Rebuild the cached GPU texture when needed (first draw or after data change).
+    if needs_rebuild {
+        SPRITE_HANDLES.with(|sprites| {
+            let mut sprites = sprites.borrow_mut();
+            if let Some(info) = sprites.get_mut(idx) {
+                SDL_STATE.with(|state| {
+                    let borrow = state.borrow();
+                    if let Some(sdl) = borrow.as_ref() {
+                        if let Ok(surface) = sdl2::surface::Surface::from_data(
+                            &mut info.surface_data,
+                            info.width,
+                            info.height,
+                            info.pitch,
+                            sdl2::pixels::PixelFormatEnum::RGB24,
+                        ) {
+                            if let Ok(texture) = sdl.texture_creator.create_texture_from_surface(&surface) {
+                                // SAFETY: The texture is valid as long as
+                                // `SdlState::texture_creator` lives. We clear
+                                // SPRITE_TEXTURES before dropping SdlState in
+                                // `runtime_shutdown`.
+                                let texture: sdl2::render::Texture<'static> =
+                                    unsafe { std::mem::transmute(texture) };
+                                SPRITE_TEXTURES.with(|t| {
+                                    let mut textures = t.borrow_mut();
+                                    if let Some(slot) = textures.get_mut(idx) {
+                                        *slot = Some(texture);
+                                    }
+                                });
+                            }
+                        }
+                        info.dirty = false;
                     }
-                }
+                });
+            }
+        });
+    }
+
+    // 3. Draw with the cached texture (no clone, no GPU upload).
+    SPRITE_TEXTURES.with(|t| {
+        let textures = t.borrow();
+        if let Some(Some(texture)) = textures.get(idx) {
+            with_sdl_mut(|s| {
+                let _ = s.canvas.copy(texture, None, Rect::new(x, y, w, h));
             });
         }
     });
@@ -774,6 +826,9 @@ pub extern "C" fn runtime_print_newline() {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn runtime_shutdown() {
+    // Drop cached GPU textures *before* the TextureCreator they reference.
+    SPRITE_TEXTURES.with(|t| t.borrow_mut().clear());
+    SPRITE_HANDLES.with(|s| s.borrow_mut().clear());
     SDL_STATE.with(|state| {
         *state.borrow_mut() = None;
     });

@@ -33,6 +33,10 @@ sudo apt install llvm-18-dev libpolly-18-dev
 export LLVM_SYS_180_PREFIX=/usr/lib/llvm-18
 ```
 
+**Windows:**
+
+See [Building on Windows](#building-on-windows) below for full instructions.
+
 ### Build
 
 ```bash
@@ -224,6 +228,51 @@ Common operations have beginner-friendly shortcuts:
 ./target/debug/gbasic program.gb --dump-ir
 ```
 
+## Building on Windows
+
+### Prerequisites
+
+1. **Visual Studio Build Tools** -- Install [Visual Studio Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) with the "Desktop development with C++" workload. This provides the MSVC compiler and linker.
+
+2. **LLVM 18** -- Download the pre-built Windows installer from [releases.llvm.org](https://github.com/llvm/llvm-project/releases) or install via Chocolatey:
+   ```powershell
+   choco install llvm --version=18.1.8
+   ```
+
+3. **SDL2 development libraries** -- Download the SDL2 development libraries for Visual C++ from [libsdl.org](https://github.com/libsdl-org/SDL/releases), or install via vcpkg:
+   ```powershell
+   vcpkg install sdl2:x64-windows
+   ```
+
+4. **CMake** -- Required for building native dependencies. Install from [cmake.org](https://cmake.org/download/) or:
+   ```powershell
+   choco install cmake
+   ```
+
+### Environment Variables
+
+Set these in your system environment or in the x64 Native Tools Command Prompt:
+
+```powershell
+set LLVM_SYS_180_PREFIX=C:\Program Files\LLVM
+```
+
+If you installed SDL2 manually (not via vcpkg), add the SDL2 `lib` directory to your `LIB` path:
+
+```powershell
+set LIB=%LIB%;C:\path\to\SDL2\lib\x64
+```
+
+### Build
+
+Open the **x64 Native Tools Command Prompt for VS** (not a regular terminal) and run:
+
+```powershell
+cargo build --release
+```
+
+> **Note:** You must use the x64 Native Tools Command Prompt so that the MSVC linker and Windows SDK paths are available. Building from a regular PowerShell or CMD window will fail to find the C linker.
+
 ## Architecture
 
 ```
@@ -293,6 +342,17 @@ cargo test -p gbasic --test error_golden
 | `color_mixer.gb` | Color manipulation |
 | `sprite_demo.gb` | Sprite loading and movement |
 | `sound_demo.gb` | Sound effects |
+
+## Assets
+
+The `assets/` directory contains minimal placeholder files that G-Basic example programs can reference out of the box:
+
+| File | Description |
+|------|-------------|
+| `assets/beep.wav` | Minimal WAV file (short silence) -- default sound effect |
+| `assets/default_sprite.bmp` | 8x8 white BMP -- default sprite placeholder |
+
+Replace these with your own assets as needed. See `assets/README.md` for details.
 
 ## License
 

@@ -54,20 +54,18 @@ fn print_error(filename: &str, source: &str, err: &GBasicError) {
     let file_id = files.add(filename, source);
 
     let diagnostic = match err {
-        GBasicError::SyntaxError { message, span } |
-        GBasicError::TypeError { message, span } |
-        GBasicError::NameError { message, span } => {
+        GBasicError::SyntaxError { message, span }
+        | GBasicError::TypeError { message, span }
+        | GBasicError::NameError { message, span } => {
             let title = match err {
                 GBasicError::SyntaxError { .. } => "Syntax error",
                 GBasicError::TypeError { .. } => "Type error",
                 GBasicError::NameError { .. } => "Name error",
                 _ => unreachable!(),
             };
-            Diagnostic::error()
-                .with_message(title)
-                .with_labels(vec![
-                    Label::primary(file_id, span.start..span.end).with_message(message),
-                ])
+            Diagnostic::error().with_message(title).with_labels(vec![
+                Label::primary(file_id, span.start..span.end).with_message(message),
+            ])
         }
         GBasicError::CodegenError { message, span } => {
             let diag = Diagnostic::error().with_message("Codegen error");
@@ -179,7 +177,12 @@ fn main() {
         let status = std::process::Command::new(&cli.output)
             .status()
             .unwrap_or_else(|e| {
-                eprintln!("{}: failed to run {}: {}", "error".red().bold(), cli.output, e);
+                eprintln!(
+                    "{}: failed to run {}: {}",
+                    "error".red().bold(),
+                    cli.output,
+                    e
+                );
                 process::exit(1);
             });
         process::exit(status.code().unwrap_or(1));

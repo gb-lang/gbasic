@@ -1,6 +1,6 @@
 pub mod token;
 
-pub use token::{tokenize, SpannedToken, Token};
+pub use token::{SpannedToken, Token, tokenize};
 
 #[cfg(test)]
 mod tests {

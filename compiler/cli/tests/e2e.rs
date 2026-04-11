@@ -86,10 +86,8 @@ fn test_for_range() {
 
 #[test]
 fn test_function_call() {
-    let out = compile_and_run(
-        "fun double(x: Int) -> Int { return x * 2 }\nprint(double(5))",
-    )
-    .unwrap();
+    let out =
+        compile_and_run("fun double(x: Int) -> Int { return x * 2 }\nprint(double(5))").unwrap();
     assert_eq!(out, "10");
 }
 
@@ -189,37 +187,46 @@ fn test_for_to_range() {
 
 #[test]
 fn test_string_match_equality() {
-    let out = compile_and_run(r#"
+    let out = compile_and_run(
+        r#"
 let s = "hello"
 match s {
     "hello" -> { print("found") }
     _ -> { print("nope") }
 }
-"#).unwrap();
+"#,
+    )
+    .unwrap();
     assert_eq!(out, "found");
 }
 
 #[test]
 fn test_string_eq_operator() {
-    let out = compile_and_run(r#"
+    let out = compile_and_run(
+        r#"
 if "abc" == "abc" {
     print("equal")
 } else {
     print("not equal")
 }
-"#).unwrap();
+"#,
+    )
+    .unwrap();
     assert_eq!(out, "equal");
 }
 
 #[test]
 fn test_string_neq_operator() {
-    let out = compile_and_run(r#"
+    let out = compile_and_run(
+        r#"
 if "abc" == "xyz" {
     print("equal")
 } else {
     print("not equal")
 }
-"#).unwrap();
+"#,
+    )
+    .unwrap();
     assert_eq!(out, "not equal");
 }
 
@@ -235,10 +242,13 @@ fn test_point_standalone() {
 
 #[test]
 fn test_point_position_assign() {
-    compile_only(r#"
+    compile_only(
+        r#"
 let obj = rect(50, 50)
 obj.position = point(100, 200)
-"#).unwrap();
+"#,
+    )
+    .unwrap();
 }
 
 #[test]

@@ -46,23 +46,31 @@ impl TypeChecker {
         );
         // Layer 1 shortcuts and value constructors
         let builtins: &[(&str, Vec<Type>, Type)] = &[
-            ("rect",   vec![Type::Unknown, Type::Unknown], Type::Int),
-            ("circle", vec![Type::Unknown],                Type::Int),
-            ("key",    vec![Type::String],                 Type::Bool),
-            ("play",   vec![Type::String],                 Type::Void),
-            ("clear",  vec![Type::Unknown],                Type::Void),
-            ("random", vec![Type::Int, Type::Int],         Type::Int),
+            ("rect", vec![Type::Unknown, Type::Unknown], Type::Int),
+            ("circle", vec![Type::Unknown], Type::Int),
+            ("key", vec![Type::String], Type::Bool),
+            ("play", vec![Type::String], Type::Void),
+            ("clear", vec![Type::Unknown], Type::Void),
+            ("random", vec![Type::Int, Type::Int], Type::Int),
             // Value constructors — return proper types
-            ("point",  vec![Type::Unknown, Type::Unknown],              Type::Point),
-            ("color",  vec![Type::Unknown, Type::Unknown, Type::Unknown], Type::Color),
+            ("point", vec![Type::Unknown, Type::Unknown], Type::Point),
+            (
+                "color",
+                vec![Type::Unknown, Type::Unknown, Type::Unknown],
+                Type::Color,
+            ),
             // Math shortcuts
-            ("abs",   vec![Type::Float], Type::Float),
-            ("sqrt",  vec![Type::Float], Type::Float),
-            ("sin",   vec![Type::Float], Type::Float),
-            ("cos",   vec![Type::Float], Type::Float),
-            ("clamp", vec![Type::Float, Type::Float, Type::Float], Type::Float),
-            ("wait",  vec![Type::Float], Type::Void),
-            ("log",   vec![Type::Unknown], Type::Void),
+            ("abs", vec![Type::Float], Type::Float),
+            ("sqrt", vec![Type::Float], Type::Float),
+            ("sin", vec![Type::Float], Type::Float),
+            ("cos", vec![Type::Float], Type::Float),
+            (
+                "clamp",
+                vec![Type::Float, Type::Float, Type::Float],
+                Type::Float,
+            ),
+            ("wait", vec![Type::Float], Type::Void),
+            ("log", vec![Type::Unknown], Type::Void),
         ];
         for (name, params, ret) in builtins {
             self.symbols.insert(
@@ -78,36 +86,48 @@ impl TypeChecker {
         }
         // Named colors as Color-typed global constants
         for color in &[
-            "black", "white", "red", "green", "blue", "yellow",
-            "orange", "purple", "pink", "cyan", "gray", "grey", "brown",
+            "black", "white", "red", "green", "blue", "yellow", "orange", "purple", "pink", "cyan",
+            "gray", "grey", "brown",
         ] {
             self.symbols.insert(
                 (*color).into(),
-                Symbol { ty: Type::Color, mutable: false },
+                Symbol {
+                    ty: Type::Color,
+                    mutable: false,
+                },
             );
         }
         // mouse as a pseudo-object (field access checked leniently)
         self.symbols.insert(
             "mouse".into(),
-            Symbol { ty: Type::Unknown, mutable: false },
+            Symbol {
+                ty: Type::Unknown,
+                mutable: false,
+            },
         );
         // screen as a pseudo-object
         self.symbols.insert(
             "screen".into(),
-            Symbol { ty: Type::Unknown, mutable: false },
+            Symbol {
+                ty: Type::Unknown,
+                mutable: false,
+            },
         );
     }
 
     fn check_statement(&mut self, stmt: &Statement) -> Result<(), GBasicError> {
         match stmt {
-            Statement::Let { name, type_ann, value, span } => {
+            Statement::Let {
+                name,
+                type_ann,
+                value,
+                span,
+            } => {
                 let val_ty = self.check_expression(value)?;
                 let ty = if let Some(ann) = type_ann {
                     if !Self::types_compatible(ann, &val_ty) {
                         return Err(GBasicError::TypeError {
-                            message: format!(
-                                "type mismatch: expected {ann}, found {val_ty}"
-                            ),
+                            message: format!("type mismatch: expected {ann}, found {val_ty}"),
                             span: *span,
                         });
                     }
@@ -115,10 +135,8 @@ impl TypeChecker {
                 } else {
                     val_ty
                 };
-                self.symbols.insert(
-                    name.name.clone(),
-                    Symbol { ty, mutable: true },
-                );
+                self.symbols
+                    .insert(name.name.clone(), Symbol { ty, mutable: true });
             }
             Statement::Function(func) => {
                 let param_types: Vec<Type> = func
@@ -145,7 +163,10 @@ impl TypeChecker {
                 for (param, ty) in func.params.iter().zip(param_types.iter()) {
                     self.symbols.insert(
                         param.name.name.clone(),
-                        Symbol { ty: ty.clone(), mutable: true },
+                        Symbol {
+                            ty: ty.clone(),
+                            mutable: true,
+                        },
                     );
                 }
                 for s in &func.body.statements {
@@ -154,7 +175,12 @@ impl TypeChecker {
                 self.symbols.pop_scope();
                 self.current_return_type = prev_ret;
             }
-            Statement::If { condition, then_block, else_block, span } => {
+            Statement::If {
+                condition,
+                then_block,
+                else_block,
+                span,
+            } => {
                 let cond_ty = self.check_expression(condition)?;
                 if !Self::types_compatible(&Type::Bool, &cond_ty) {
                     return Err(GBasicError::TypeError {
@@ -167,7 +193,11 @@ impl TypeChecker {
                     self.check_block(else_b)?;
                 }
             }
-            Statement::While { condition, body, span } => {
+            Statement::While {
+                condition,
+                body,
+                span,
+            } => {
                 let cond_ty = self.check_expression(condition)?;
                 if !Self::types_compatible(&Type::Bool, &cond_ty) {
                     return Err(GBasicError::TypeError {
@@ -179,7 +209,12 @@ impl TypeChecker {
                 self.check_block(body)?;
                 self.loop_depth -= 1;
             }
-            Statement::For { variable, iterable, body, .. } => {
+            Statement::For {
+                variable,
+                iterable,
+                body,
+                ..
+            } => {
                 let iter_ty = self.check_expression(iterable)?;
                 let var_ty = match &iter_ty {
                     Type::Array(inner) => *inner.clone(),
@@ -188,7 +223,10 @@ impl TypeChecker {
                 self.symbols.push_scope();
                 self.symbols.insert(
                     variable.name.clone(),
-                    Symbol { ty: var_ty, mutable: false },
+                    Symbol {
+                        ty: var_ty,
+                        mutable: false,
+                    },
                 );
                 self.loop_depth += 1;
                 for s in &body.statements {
@@ -264,14 +302,14 @@ impl TypeChecker {
                 LiteralKind::String(_) => Type::String,
                 LiteralKind::Bool(_) => Type::Bool,
             }),
-            Expression::Identifier(id) => {
-                self.symbols.lookup(&id.name).map(|s| s.ty.clone()).ok_or(
-                    GBasicError::NameError {
-                        message: format!("undefined variable '{}'", id.name),
-                        span: id.span,
-                    },
-                )
-            }
+            Expression::Identifier(id) => self
+                .symbols
+                .lookup(&id.name)
+                .map(|s| s.ty.clone())
+                .ok_or(GBasicError::NameError {
+                    message: format!("undefined variable '{}'", id.name),
+                    span: id.span,
+                }),
             Expression::BinaryOp {
                 left,
                 op,
@@ -282,11 +320,7 @@ impl TypeChecker {
                 let rt = self.check_expression(right)?;
                 self.check_binary_op(&lt, op, &rt, *span)
             }
-            Expression::UnaryOp {
-                op,
-                operand,
-                span,
-            } => {
+            Expression::UnaryOp { op, operand, span } => {
                 let t = self.check_expression(operand)?;
                 match op {
                     UnaryOp::Neg => {
@@ -311,11 +345,7 @@ impl TypeChecker {
                     }
                 }
             }
-            Expression::Call {
-                callee,
-                args,
-                span,
-            } => {
+            Expression::Call { callee, args, span } => {
                 let callee_ty = self.check_expression(callee)?;
                 match callee_ty {
                     Type::Function { params, ret } => {
@@ -380,9 +410,7 @@ impl TypeChecker {
                     let target_ty = sym.ty.clone();
                     if !Self::types_compatible(&target_ty, &val_ty) {
                         return Err(GBasicError::TypeError {
-                            message: format!(
-                                "cannot assign {val_ty} to {target_ty}"
-                            ),
+                            message: format!("cannot assign {val_ty} to {target_ty}"),
                             span: *span,
                         });
                     }
@@ -488,7 +516,12 @@ impl TypeChecker {
                     })
                 }
             }
-            BinaryOp::Eq | BinaryOp::Neq | BinaryOp::Lt | BinaryOp::Gt | BinaryOp::Le | BinaryOp::Ge => {
+            BinaryOp::Eq
+            | BinaryOp::Neq
+            | BinaryOp::Lt
+            | BinaryOp::Gt
+            | BinaryOp::Le
+            | BinaryOp::Ge => {
                 if lt == rt || is_int_float_mix(lt, rt) {
                     Ok(Type::Bool)
                 } else {
@@ -503,7 +536,9 @@ impl TypeChecker {
                     Ok(Type::Bool)
                 } else {
                     Err(GBasicError::TypeError {
-                        message: format!("logical '{op}' requires Bool operands, found {lt} and {rt}"),
+                        message: format!(
+                            "logical '{op}' requires Bool operands, found {lt} and {rt}"
+                        ),
                         span,
                     })
                 }
@@ -583,7 +618,9 @@ mod tests {
 
     #[test]
     fn function_decl_and_call() {
-        assert!(check_src("fun add(a: Int, b: Int) -> Int { return a + b }\nlet x = add(1, 2)").is_ok());
+        assert!(
+            check_src("fun add(a: Int, b: Int) -> Int { return a + b }\nlet x = add(1, 2)").is_ok()
+        );
     }
 
     #[test]

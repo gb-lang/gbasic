@@ -42,16 +42,16 @@ fn test_type_mismatch_error() {
 fn test_undefined_variable_error() {
     let stderr = compile_stderr("print(undefined_var)");
     assert!(
-        stderr.contains("Name error") || stderr.contains("undefined") || stderr.contains("not defined"),
+        stderr.contains("Name error")
+            || stderr.contains("undefined")
+            || stderr.contains("not defined"),
         "Expected name error, got: {stderr}"
     );
 }
 
 #[test]
 fn test_wrong_arg_count_error() {
-    let stderr = compile_stderr(
-        "fun greet(name: String) { print(name) }\ngreet()",
-    );
+    let stderr = compile_stderr("fun greet(name: String) { print(name) }\ngreet()");
     assert!(
         stderr.contains("argument") || stderr.contains("parameter"),
         "Expected argument count error, got: {stderr}"

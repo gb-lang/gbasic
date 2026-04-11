@@ -4,12 +4,12 @@
 //! Then: cd poc_web_output && python3 -m http.server 8080
 //! Open: http://localhost:8080/poc_web.html
 
+use inkwell::OptimizationLevel;
 use inkwell::context::Context;
 use inkwell::module::Module;
 use inkwell::targets::{
     CodeModel, FileType, InitializationConfig, RelocMode, Target, TargetTriple,
 };
-use inkwell::OptimizationLevel;
 use std::fs;
 use std::path::Path;
 
@@ -21,10 +21,7 @@ fn build_module(context: &Context) -> Module<'_> {
     let void_type = context.void_type();
 
     // Declare imported JS functions
-    let clear_fn_type = void_type.fn_type(
-        &[i8_type.into(), i8_type.into(), i8_type.into()],
-        false,
-    );
+    let clear_fn_type = void_type.fn_type(&[i8_type.into(), i8_type.into(), i8_type.into()], false);
     let clear_fn = module.add_function("js_clear_screen", clear_fn_type, None);
 
     let present_fn_type = void_type.fn_type(&[], false);
@@ -38,15 +35,17 @@ fn build_module(context: &Context) -> Module<'_> {
 
     builder.position_at_end(entry_bb);
     // Clear to blue
-    builder.build_call(
-        clear_fn,
-        &[
-            i8_type.const_int(30, false).into(),
-            i8_type.const_int(60, false).into(),
-            i8_type.const_int(180, false).into(),
-        ],
-        "",
-    ).unwrap();
+    builder
+        .build_call(
+            clear_fn,
+            &[
+                i8_type.const_int(30, false).into(),
+                i8_type.const_int(60, false).into(),
+                i8_type.const_int(180, false).into(),
+            ],
+            "",
+        )
+        .unwrap();
 
     builder.build_call(present_fn, &[], "").unwrap();
     builder.build_return(None).unwrap();

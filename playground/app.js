@@ -1,6 +1,14 @@
-// G-Basic Playground — Day 1 scaffold.
-// Day 1 morning: editor + canvas + button wiring + stub Run.
-// Day 1 afternoon: replaces stub Run with POST /compile to the axum service.
+// G-Basic Playground.
+//
+// Sends source to the compile service (services/compile/) which returns
+// a wasm bundle + runtime.js. The playground instantiates that locally
+// and runs it against the canvas. The real WASM runtime wiring (sprite
+// + sound) lands Day 2; for now successful compiles are reported and
+// the wasm size is logged so the round-trip is observable.
+
+const COMPILE_ENDPOINT =
+  (typeof window !== "undefined" && window.__GBASIC_COMPILE_URL) ||
+  "http://localhost:8080/compile";
 
 const SAMPLE_PROGRAM = `// Welcome to G-Basic!
 // Click ▶ Run to see your program in action.
@@ -74,43 +82,66 @@ async function runProgram() {
   stopBtn.disabled = false;
   consoleEl.textContent = "";
 
-  // STUB compile path — Day 1 afternoon replaces this with a real
-  // POST /compile call to the axum service.
-  log("Compiling…");
-  await sleep(150);
-
-  const source = editor.getValue();
   const ctx = canvas.getContext("2d");
   ctx.fillStyle = "#1e1e2e";
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-  // Naive parse so the canvas isn't empty during scaffold demo.
-  // Real interpretation comes from the WASM runtime in Day 2.
-  const printed = [];
-  for (const line of source.split("\n")) {
-    const m = line.match(/^\s*print\s*\(\s*"([^"]*)"\s*\)/);
-    if (m) printed.push(m[1]);
+  const source = editor.getValue();
+  log("Compiling…");
+
+  let result;
+  try {
+    const res = await fetch(COMPILE_ENDPOINT, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ source }),
+    });
+    result = await res.json();
+    if (!res.ok && !result?.errors) {
+      result = { errors: `compile service: HTTP ${res.status}` };
+    }
+  } catch (e) {
+    result = {
+      errors:
+        `compile service unreachable at ${COMPILE_ENDPOINT}\n` +
+        `(${e.message})\n\n` +
+        `start it locally with:\n  cargo run -p gbasic-compile-service`,
+    };
   }
 
+  if (result.errors) {
+    log("✖ compile failed:");
+    log(result.errors);
+    finishRun();
+    return;
+  }
+
+  const wasmBytes = base64ToBytes(result.wasm);
+  log(`✓ compiled (${wasmBytes.length} bytes wasm, ${result.js.length} chars js)`);
+  log("[Day 2] WASM instantiation + runtime canvas painting lands next.");
+
+  // Day 2 will replace this placeholder with eval(result.js) +
+  // WebAssembly.instantiate(wasmBytes). For now we only verify the
+  // round-trip and surface compile output to the console.
   ctx.fillStyle = "#cdd6f4";
-  ctx.font = "32px sans-serif";
-  let y = 80;
-  for (const text of printed) {
-    ctx.fillText(text, 40, y);
-    log(text);
-    y += 48;
-  }
-
-  if (printed.length === 0) {
-    log("[stub] real compilation lands Day 1 afternoon.");
-  } else {
-    log(`[stub] rendered ${printed.length} print() call${printed.length === 1 ? "" : "s"}.`);
-  }
+  ctx.font = "20px sans-serif";
+  ctx.fillText("compile OK — runtime wiring lands Day 2", 40, 60);
 
   canvas.focus();
+  finishRun();
+}
+
+function finishRun() {
   running = false;
   runBtn.disabled = false;
   stopBtn.disabled = true;
+}
+
+function base64ToBytes(b64) {
+  const bin = atob(b64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
 }
 
 function stopProgram() {

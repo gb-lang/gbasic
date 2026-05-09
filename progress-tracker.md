@@ -9,23 +9,24 @@
 | Field | Value |
 |-------|-------|
 | current_day | 1 |
-| current_phase | afternoon |
-| gate_status | working |
-| last_pr | #4 (timeline doc — merged) |
-| last_tick | 2026-05-09 — Day 1 morning: playground scaffold landed |
+| current_phase | day_done |
+| gate_status | awaiting_review |
+| last_pr | (set after PR open) |
+| last_tick | 2026-05-09 — Day 1 afternoon: compile service + playground wire-up landed |
 | blocker | — |
 
-**Day 1 morning — done:**
-- Static site at `playground/` (zero-build, Monaco from CDN)
-- Editor pane, output canvas, Run/Stop/Share buttons
-- Canvas keyboard-focus wiring (`tabindex=0` + click-to-focus)
-- Stub run path: naive `print("…")` extraction renders to canvas + console (real compile lands afternoon; real WASM runtime lands Day 2 morning where it logically belongs — the "hardcoded WASM bundle" subitem is folded into Day 2)
+**Day 1 — done:**
+- `playground/` static site (Monaco + canvas + Run/Stop/Share)
+- `services/compile/` axum service: `POST /compile` → `{wasm,js,errors?}`
+  - 1MB source cap, 5s timeout, 5MB output cap, per-request `TempDir`
+  - Picks `game_async.wasm` if present, else `game.wasm`
+  - `/healthz` for liveness
+- `services/compile/Dockerfile` (LLVM 18 + lld + binaryen + Rust build → slim Debian runtime, non-root user)
+- Playground `Run` button now calls `POST /compile`, base64-decodes the wasm, logs round-trip stats — actual WASM instantiation deferred to Day 2 (where the runtime sprite/sound work lives)
+- `cargo check -p gbasic-compile-service` passes locally
 
-**Day 1 afternoon — next:**
-- New crate `services/compile/` (axum endpoint wrapping `gbasic --target web`)
-- Sandbox: tmpfs, 5s timeout, 1MB source limit
-- Dockerfile for Fly.io / Cloudflare Containers
-- Wire playground → service, replace stub Run with real compile
+**Carryover into Day 2:**
+- Replace the placeholder "compile OK — runtime wiring lands Day 2" canvas message with `eval(result.js)` + `WebAssembly.instantiate(wasmBytes)` once the web runtime sprite + sound paths are real
 
 **Defaults locked in (per plan §Open Questions):**
 - Cadence: self-paced

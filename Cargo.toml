@@ -9,6 +9,7 @@ members = [
     "compiler/cli",
     "runtime/desktop",
     "runtime/web",
+    "services/compile",
 ]
 
 [workspace.package]

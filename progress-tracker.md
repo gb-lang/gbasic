@@ -2,6 +2,37 @@
 
 > Last updated: 2026-02-18 — Deep review: CLI, runtime/desktop, runtime/web, irgen, web_glue all audited. Accurate status for all items.
 
+## Kids-Launch Sprint State
+
+> Loop-driven sprint per `docs/kids-launch-timeline.md`. Updated every tick by the `/loop` skill following the control flow in `~/.claude/plans/i-want-a-loop-fuzzy-bentley.md`.
+
+| Field | Value |
+|-------|-------|
+| current_day | 1 |
+| current_phase | afternoon |
+| gate_status | working |
+| last_pr | #4 (timeline doc — merged) |
+| last_tick | 2026-05-09 — Day 1 morning: playground scaffold landed |
+| blocker | — |
+
+**Day 1 morning — done:**
+- Static site at `playground/` (zero-build, Monaco from CDN)
+- Editor pane, output canvas, Run/Stop/Share buttons
+- Canvas keyboard-focus wiring (`tabindex=0` + click-to-focus)
+- Stub run path: naive `print("…")` extraction renders to canvas + console (real compile lands afternoon; real WASM runtime lands Day 2 morning where it logically belongs — the "hardcoded WASM bundle" subitem is folded into Day 2)
+
+**Day 1 afternoon — next:**
+- New crate `services/compile/` (axum endpoint wrapping `gbasic --target web`)
+- Sandbox: tmpfs, 5s timeout, 1MB source limit
+- Dockerfile for Fly.io / Cloudflare Containers
+- Wire playground → service, replace stub Run with real compile
+
+**Defaults locked in (per plan §Open Questions):**
+- Cadence: self-paced
+- Day-end gate: strict (loop holds until merge)
+- Asset license: Kenney CC0 only
+- Hosting: deferred — will request Chibueze decision on the Day 5 PR
+
 ## Legend
 - ✅ Done — fully implemented, tested
 - 🟡 Partial — implemented but has known gaps

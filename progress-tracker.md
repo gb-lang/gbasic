@@ -11,7 +11,7 @@
 | current_day | 1 |
 | current_phase | day_done |
 | gate_status | awaiting_review |
-| last_pr | (set after PR open) |
+| last_pr | #5 (Day 1 — awaiting Chibueze) |
 | last_tick | 2026-05-09 — Day 1 afternoon: compile service + playground wire-up landed |
 | blocker | — |
 

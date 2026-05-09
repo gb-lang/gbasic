@@ -17,11 +17,11 @@ use std::process::Stdio;
 use std::time::Duration;
 
 use axum::{
+    Router,
     extract::DefaultBodyLimit,
     http::StatusCode,
     response::Json,
     routing::{get, post},
-    Router,
 };
 use base64::Engine;
 use serde::{Deserialize, Serialize};
@@ -60,8 +60,7 @@ struct CompileResponse {
 async fn main() {
     tracing_subscriber::fmt()
         .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "info".into()),
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
         )
         .init();
 
@@ -81,9 +80,7 @@ async fn main() {
         .and_then(|s| s.parse().ok())
         .unwrap_or(8080);
     let addr = format!("0.0.0.0:{port}");
-    let listener = tokio::net::TcpListener::bind(&addr)
-        .await
-        .expect("bind");
+    let listener = tokio::net::TcpListener::bind(&addr).await.expect("bind");
     tracing::info!(%addr, "compile-service listening");
     axum::serve(listener, app).await.expect("serve");
 }
@@ -108,7 +105,10 @@ async fn compile(Json(req): Json<CompileRequest>) -> (StatusCode, Json<CompileRe
 
     let out_dir = dir.path().join("out");
     if let Err(e) = tokio::fs::create_dir(&out_dir).await {
-        return error(StatusCode::INTERNAL_SERVER_ERROR, &format!("mkdir out: {e}"));
+        return error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            &format!("mkdir out: {e}"),
+        );
     }
 
     let mut cmd = Command::new(gbasic_bin());
@@ -147,7 +147,12 @@ async fn compile(Json(req): Json<CompileRequest>) -> (StatusCode, Json<CompileRe
 
     let wasm_bytes = match read_with_cap(&wasm_path).await {
         Ok(b) => b,
-        Err(e) => return error(StatusCode::INTERNAL_SERVER_ERROR, &format!("read wasm: {e}")),
+        Err(e) => {
+            return error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                &format!("read wasm: {e}"),
+            );
+        }
     };
     let js_text = match tokio::fs::read_to_string(&js_path).await {
         Ok(s) => s,
@@ -174,9 +179,7 @@ async fn pick_wasm(out_dir: &Path) -> std::path::PathBuf {
 }
 
 async fn read_with_cap(path: &Path) -> Result<Vec<u8>, String> {
-    let meta = tokio::fs::metadata(path)
-        .await
-        .map_err(|e| e.to_string())?;
+    let meta = tokio::fs::metadata(path).await.map_err(|e| e.to_string())?;
     if meta.len() > MAX_OUTPUT_BYTES {
         return Err(format!("output exceeds {MAX_OUTPUT_BYTES} bytes"));
     }

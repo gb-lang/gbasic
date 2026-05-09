@@ -12,8 +12,8 @@
 | current_phase | day_done |
 | gate_status | awaiting_review |
 | last_pr | #5 (Day 1 — awaiting Chibueze) |
-| last_tick | 2026-05-09 — pushed cargo-fmt fix `44f38cc` to clear CI red |
-| blocker | — (was: CI fmt-check red, fixed) |
+| last_tick | 2026-05-09 — PR #5 CI now green (both ubuntu + macos); idle until merge |
+| blocker | — |
 
 **Day 1 — done:**
 - `playground/` static site (Monaco + canvas + Run/Stop/Share)

@@ -23,3 +23,7 @@ Thumbs.db
 *.html
 poc_desktop
 poc_web
+
+# Playground hand-written source (counter-exception to *.html, which
+# is meant for compiler-generated web bundles).
+!playground/*.html

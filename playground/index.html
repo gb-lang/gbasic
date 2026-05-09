@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>G-Basic Playground</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header>
+    <div class="logo">G-Basic</div>
+    <div class="actions">
+      <button id="run-btn" type="button">▶ Run</button>
+      <button id="stop-btn" type="button" disabled>■ Stop</button>
+      <button id="share-btn" type="button">⇪ Share</button>
+    </div>
+  </header>
+  <main>
+    <section id="editor-pane">
+      <div id="editor"></div>
+    </section>
+    <section id="output-pane">
+      <canvas id="canvas" width="800" height="600" tabindex="0"></canvas>
+      <pre id="console" aria-label="Output console"></pre>
+    </section>
+  </main>
+  <div id="mobile-warning">Use a desktop or laptop for the best experience.</div>
+  <script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs/loader.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

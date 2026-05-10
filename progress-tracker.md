@@ -2,6 +2,38 @@
 
 > Last updated: 2026-02-18 — Deep review: CLI, runtime/desktop, runtime/web, irgen, web_glue all audited. Accurate status for all items.
 
+## Kids-Launch Sprint State
+
+> Loop-driven sprint per `docs/kids-launch-timeline.md`. Updated every tick by the `/loop` skill following the control flow in `~/.claude/plans/i-want-a-loop-fuzzy-bentley.md`.
+
+| Field | Value |
+|-------|-------|
+| current_day | 1 |
+| current_phase | day_done |
+| gate_status | awaiting_review |
+| last_pr | #5 (Day 1 — awaiting Chibueze) |
+| last_tick | 2026-05-09 — PR #5 CI now green (both ubuntu + macos); idle until merge |
+| blocker | — |
+
+**Day 1 — done:**
+- `playground/` static site (Monaco + canvas + Run/Stop/Share)
+- `services/compile/` axum service: `POST /compile` → `{wasm,js,errors?}`
+  - 1MB source cap, 5s timeout, 5MB output cap, per-request `TempDir`
+  - Picks `game_async.wasm` if present, else `game.wasm`
+  - `/healthz` for liveness
+- `services/compile/Dockerfile` (LLVM 18 + lld + binaryen + Rust build → slim Debian runtime, non-root user)
+- Playground `Run` button now calls `POST /compile`, base64-decodes the wasm, logs round-trip stats — actual WASM instantiation deferred to Day 2 (where the runtime sprite/sound work lives)
+- `cargo check -p gbasic-compile-service` passes locally
+
+**Carryover into Day 2:**
+- Replace the placeholder "compile OK — runtime wiring lands Day 2" canvas message with `eval(result.js)` + `WebAssembly.instantiate(wasmBytes)` once the web runtime sprite + sound paths are real
+
+**Defaults locked in (per plan §Open Questions):**
+- Cadence: self-paced
+- Day-end gate: strict (loop holds until merge)
+- Asset license: Kenney CC0 only
+- Hosting: deferred — will request Chibueze decision on the Day 5 PR
+
 ## Legend
 - ✅ Done — fully implemented, tested
 - 🟡 Partial — implemented but has known gaps

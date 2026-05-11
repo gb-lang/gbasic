@@ -9,13 +9,13 @@
 | Field | Value |
 |-------|-------|
 | current_day | 2 |
-| current_phase | morning |
-| gate_status | working |
-| last_pr | #5 (Day 1 — MERGED 2026-05-10) |
-| last_tick | 2026-05-11 — Day 2 morning: web sprite + sound paths replaced |
+| current_phase | day_done |
+| gate_status | awaiting_review |
+| last_pr | (set after Day 2 PR open) |
+| last_tick | 2026-05-11 — Day 2 morning+afternoon: web runtime sprite + sound + small playground message update |
 | blocker | — |
 
-**Day 2 morning — done:**
+**Day 2 — done:**
 - `runtime_screen_sprite_load` (web): async fetch with `.png` / `.jpg` / `.jpeg` candidates from `assets/sprites/<name>`; cached by handle index in `state.sprites[]`; drawing before load completes is a silent no-op
 - `runtime_screen_sprite_at` / `_scale`: sprite property mutation, returns handle for chaining
 - `runtime_screen_sprite_draw`: `ctx.drawImage(image, x, y, w*scale, h*scale)`; respects `ready` flag
@@ -26,10 +26,21 @@
 
 `cargo check -p gbasic-irgen --no-default-features` clean.
 
-**Day 2 afternoon — next:**
-- Update `web_parity.rs` if needed (no new declared names — should still pass)
-- Drop BMP-only restriction on web side (effectively already done — PNG/JPG supported)
-- Keep `IO.read_file` web stub returning empty (browser FS access out of scope)
+**Day 2 afternoon (morning+afternoon folded — natural single change):**
+- Sound (load/play/volume) was the afternoon's main work — landed alongside sprite in the same edit because both share the same `state` extensions and helper-fn pattern
+- `web_parity.rs` already passing (the names were on the declared list pre-existing; only the bodies changed)
+- BMP-only restriction was desktop-side only; web now supports PNG/JPG/JPEG with extension probing
+- `IO.read_file` web stub intentionally left returning empty
+
+**Playground execution wiring (Day 1 carryover):**
+- Deferred to Day 4 where it stacks naturally with the lesson runner's iframe sandbox. The playground now logs "sandboxed runner lands Day 4" instead of the stale "Day 2" message.
+
+**Day 3 — next:**
+- Curate 15 Kenney CC0 sprites + 10 sounds; drop into `assets/{sprites,sounds}/`
+- `assets/manifest.json` for name → file resolution
+- `assets/CREDITS.md` per-asset attribution
+- Wire `Asset.Sprite(name)` / `Asset.Sound(name)` through both desktop and web codegen+runtime
+- Asset picker panel in playground
 
 **Day 1 — done:**
 - `playground/` static site (Monaco + canvas + Run/Stop/Share)

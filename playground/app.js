@@ -118,14 +118,12 @@ async function runProgram() {
 
   const wasmBytes = base64ToBytes(result.wasm);
   log(`✓ compiled (${wasmBytes.length} bytes wasm, ${result.js.length} chars js)`);
-  log("[Day 2] WASM instantiation + runtime canvas painting lands next.");
+  log("Runtime is real (sprite + sound landed Day 2); per-program iframe");
+  log("sandbox + actual playback lands Day 4 alongside the lesson runner.");
 
-  // Day 2 will replace this placeholder with eval(result.js) +
-  // WebAssembly.instantiate(wasmBytes). For now we only verify the
-  // round-trip and surface compile output to the console.
   ctx.fillStyle = "#cdd6f4";
   ctx.font = "20px sans-serif";
-  ctx.fillText("compile OK — runtime wiring lands Day 2", 40, 60);
+  ctx.fillText("compile OK — sandboxed runner lands Day 4", 40, 60);
 
   canvas.focus();
   finishRun();

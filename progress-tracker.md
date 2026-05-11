@@ -11,7 +11,7 @@
 | current_day | 2 |
 | current_phase | day_done |
 | gate_status | awaiting_review |
-| last_pr | (set after Day 2 PR open) |
+| last_pr | #6 (Day 2 — awaiting Chibueze) |
 | last_tick | 2026-05-11 — Day 2 morning+afternoon: web runtime sprite + sound + small playground message update |
 | blocker | — |
 

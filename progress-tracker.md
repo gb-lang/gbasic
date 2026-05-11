@@ -8,12 +8,28 @@
 
 | Field | Value |
 |-------|-------|
-| current_day | 1 |
-| current_phase | day_done |
-| gate_status | awaiting_review |
-| last_pr | #5 (Day 1 — awaiting Chibueze) |
-| last_tick | 2026-05-09 — PR #5 CI now green (both ubuntu + macos); idle until merge |
+| current_day | 2 |
+| current_phase | morning |
+| gate_status | working |
+| last_pr | #5 (Day 1 — MERGED 2026-05-10) |
+| last_tick | 2026-05-11 — Day 2 morning: web sprite + sound paths replaced |
 | blocker | — |
+
+**Day 2 morning — done:**
+- `runtime_screen_sprite_load` (web): async fetch with `.png` / `.jpg` / `.jpeg` candidates from `assets/sprites/<name>`; cached by handle index in `state.sprites[]`; drawing before load completes is a silent no-op
+- `runtime_screen_sprite_at` / `_scale`: sprite property mutation, returns handle for chaining
+- `runtime_screen_sprite_draw`: `ctx.drawImage(image, x, y, w*scale, h*scale)`; respects `ready` flag
+- `runtime_sound_effect_load` (web): pre-warms `state.soundCache` (Map<name, AudioBuffer>) via fetch + `decodeAudioData`; tries `.wav` / `.mp3` / `.ogg`
+- `runtime_sound_effect_play` (web): plays buffered sound through a per-call `GainNode`; lazy `AudioContext.resume()` for autoplay-policy safety
+- `runtime_sound_effect_volume` (web): name-keyed `state.soundVolumes` map applied at play time
+- `state.assetSpriteRoot` / `assetSoundRoot` are host-overridable so the playground can point to its own asset dir
+
+`cargo check -p gbasic-irgen --no-default-features` clean.
+
+**Day 2 afternoon — next:**
+- Update `web_parity.rs` if needed (no new declared names — should still pass)
+- Drop BMP-only restriction on web side (effectively already done — PNG/JPG supported)
+- Keep `IO.read_file` web stub returning empty (browser FS access out of scope)
 
 **Day 1 — done:**
 - `playground/` static site (Monaco + canvas + Run/Stop/Share)

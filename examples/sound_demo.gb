@@ -5,16 +5,16 @@ while true {
     System.FrameBegin()
 
     if Input.KeyPressed("1") {
-        Sound.Beep(440, 200)
+        play("jump")
     }
     if Input.KeyPressed("2") {
-        Sound.Beep(880, 200)
+        play("coin")
     }
     if Input.KeyPressed("3") {
-        Sound.Beep(220, 400)
+        play("hit")
     }
     if Input.KeyPressed("space") {
-        Sound.Beep(660, 100)
+        play("swoosh")
     }
 
     Screen.Clear(20, 20, 40)

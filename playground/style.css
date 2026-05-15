@@ -57,6 +57,51 @@ main {
   border-left: 1px solid #313244;
 }
 
+#asset-panel {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+  padding: 0.625rem 0.75rem;
+  background: #181825;
+  border-bottom: 1px solid #313244;
+}
+
+.asset-group {
+  min-width: 0;
+}
+
+.asset-group > span {
+  display: block;
+  margin-bottom: 0.35rem;
+  color: #bac2de;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.asset-list {
+  display: flex;
+  gap: 0.35rem;
+  overflow-x: auto;
+  padding-bottom: 0.1rem;
+}
+
+.asset-list button {
+  flex: 0 0 auto;
+  padding: 0.3rem 0.45rem;
+  border: 1px solid #45475a;
+  border-radius: 4px;
+  background: #313244;
+  color: #cdd6f4;
+  cursor: pointer;
+  font-size: 0.75rem;
+}
+
+.asset-list button:hover {
+  border-color: #89b4fa;
+  color: #89b4fa;
+}
+
 #runner-host {
   flex: 1;
   width: 100%;

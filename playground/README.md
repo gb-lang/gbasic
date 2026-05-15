@@ -4,9 +4,10 @@ Browser-based playground where kids can write and run G-Basic programs without i
 
 ## Status
 
-Day 1 scaffold (morning): Monaco editor + output canvas + Run/Stop/Share buttons + a stubbed "compile" path that naively renders `print("…")` calls so the plumbing is verifiable.
-
-The real compile path lands in Day 1 afternoon (`services/compile/`). The real WASM runtime lands in Day 2.
+The playground has a Monaco editor, compile-service integration, a sandboxed
+WASM runner, and a starter asset picker. It expects the compile service from
+`services/compile/` to be running locally or reachable through
+`window.__GBASIC_COMPILE_URL`.
 
 ## Local dev
 
@@ -23,8 +24,9 @@ Visit http://localhost:8000 and click ▶ Run.
 ## Files
 
 - `index.html` — page shell, loads Monaco from CDN
-- `app.js` — editor init, button handlers, stub run path
+- `app.js` — editor init, Run/Stop/Share handlers, sandboxed WASM runner, asset picker
 - `style.css` — layout and theme
+- `assets/` — web-served copy of the starter asset pack
 
 ## Plan
 

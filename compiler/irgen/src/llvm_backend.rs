@@ -125,6 +125,8 @@ fn get_namespace_method(namespace: NamespaceRef, method: &str) -> Option<MethodE
         (IO, "writefile") => (vec![Ptr, Ptr], Void),
         // Asset
         (Asset, "load") => (vec![Ptr], I64),
+        (Asset, "sprite") => (vec![Ptr], I64),
+        (Asset, "sound") => (vec![Ptr], I64),
         _ => return None,
     };
     // Special-case runtime names that don't follow the convention

@@ -8,12 +8,29 @@
 
 | Field | Value |
 |-------|-------|
-| current_day | 2 |
+| current_day | 3 |
 | current_phase | day_done |
 | gate_status | awaiting_review |
-| last_pr | #6 (Day 2 — awaiting Chibueze) |
-| last_tick | 2026-05-15 — Day 2 corrected: web runtime sprite + sound plus real playground iframe execution |
+| last_pr | pending (Day 3 — asset library + Asset namespace) |
+| last_tick | 2026-05-15 — Day 3: CC0 starter assets, Asset.Sprite/Sound, asset picker |
 | blocker | — |
+
+**Day 3 — done:**
+- Added a CC0 starter asset pack with 15 generated sprites and 10 generated sound effects
+- Root runtime assets live in `assets/{sprites,sounds}/`; web-playground copies live in `playground/assets/{sprites,sounds}/`
+- Added `assets/manifest.json` and `playground/assets/manifest.json` for asset discovery
+- Added `assets/CREDITS.md` and `playground/assets/CREDITS.md`
+- Added `sprite("name")` Layer 1 shortcut, desugaring to `Asset.Sprite("name")`
+- Added `Asset.Sprite(name)` and `Asset.Sound(name)` compiler/runtime support
+- Web runtime now resolves simple asset names, explicit paths, and extensionless custom paths
+- Desktop runtime resolves simple sprite/sound names against bundled `assets/` fallbacks
+- Playground asset picker loads the manifest and inserts `sprite("hero")` / `play("jump")` snippets
+- `examples/sprite_demo.gb` and `examples/sound_demo.gb` now use bundled name-based assets
+
+**Day 4 — next:**
+- Add 6 in-playground lessons from hello screen to first game
+- Lesson runner UI, starter/solution loading, `/learn/N` routes, local completion state
+- Add lesson smoke-test fixtures
 
 **Day 2 — done:**
 - `runtime_screen_sprite_load` (web): async fetch with `.png` / `.jpg` / `.jpeg` candidates from `assets/sprites/<name>`; cached by handle index in `state.sprites[]`; drawing before load completes is a silent no-op
@@ -38,13 +55,6 @@
 
 **Playground execution wiring (Day 1 carryover):**
 - Completed in Day 2 correction. The playground now executes compile-service bundles in a per-run iframe sandbox.
-
-**Day 3 — next:**
-- Curate 15 Kenney CC0 sprites + 10 sounds; drop into `assets/{sprites,sounds}/`
-- `assets/manifest.json` for name → file resolution
-- `assets/CREDITS.md` per-asset attribution
-- Wire `Asset.Sprite(name)` / `Asset.Sound(name)` through both desktop and web codegen+runtime
-- Asset picker panel in playground
 
 **Day 1 — done:**
 - `playground/` static site (Monaco + canvas + Run/Stop/Share)

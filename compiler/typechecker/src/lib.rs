@@ -48,6 +48,7 @@ impl TypeChecker {
         let builtins: &[(&str, Vec<Type>, Type)] = &[
             ("rect", vec![Type::Unknown, Type::Unknown], Type::Int),
             ("circle", vec![Type::Unknown], Type::Int),
+            ("sprite", vec![Type::String], Type::Int),
             ("key", vec![Type::String], Type::Bool),
             ("play", vec![Type::String], Type::Void),
             ("clear", vec![Type::Unknown], Type::Void),

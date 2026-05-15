@@ -7,6 +7,7 @@
 const COMPILE_ENDPOINT =
   (typeof window !== "undefined" && window.__GBASIC_COMPILE_URL) ||
   "http://localhost:8080/compile";
+const ASSET_MANIFEST_URL = "assets/manifest.json";
 
 const SAMPLE_PROGRAM = `// Welcome to G-Basic!
 // Click ▶ Run to see your program in action.
@@ -30,6 +31,8 @@ const shareBtn = document.getElementById("share-btn");
 const canvas = document.getElementById("canvas");
 const consoleEl = document.getElementById("console");
 const runnerHost = document.getElementById("runner-host");
+const spriteAssetsEl = document.getElementById("sprite-assets");
+const soundAssetsEl = document.getElementById("sound-assets");
 
 require.config({
   paths: { vs: "https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs" }
@@ -71,6 +74,7 @@ require(["vs/editor/editor.main"], () => {
 runBtn.addEventListener("click", runProgram);
 stopBtn.addEventListener("click", stopProgram);
 shareBtn.addEventListener("click", shareProgram);
+loadAssetPanel();
 
 // Capture keyboard for the canvas when the program is running.
 canvas.addEventListener("click", () => canvas.focus());
@@ -225,4 +229,36 @@ function escapeScript(js) {
   return js
     .replace(/<\/script/gi, "<\\/script")
     .replace(/<!--/g, "<\\!--");
+}
+
+async function loadAssetPanel() {
+  try {
+    const res = await fetch(ASSET_MANIFEST_URL);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const manifest = await res.json();
+    renderAssetButtons(spriteAssetsEl, manifest.sprites || [], (name) => `sprite("${name}")`);
+    renderAssetButtons(soundAssetsEl, manifest.sounds || [], (name) => `play("${name}")`);
+  } catch (e) {
+    console.warn("asset manifest unavailable:", e);
+  }
+}
+
+function renderAssetButtons(container, assets, snippetFor) {
+  if (!container) return;
+  container.textContent = "";
+  for (const asset of assets) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = asset.name;
+    button.title = `Insert ${asset.name}`;
+    button.addEventListener("click", () => insertSnippet(snippetFor(asset.name)));
+    container.appendChild(button);
+  }
+}
+
+function insertSnippet(snippet) {
+  if (!editor) return;
+  const selection = editor.getSelection();
+  editor.executeEdits("asset-picker", [{ range: selection, text: snippet, forceMoveMarkers: true }]);
+  editor.focus();
 }

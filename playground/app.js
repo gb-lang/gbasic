@@ -84,6 +84,7 @@ require(["vs/editor/editor.main"], () => {
     automaticLayout: true,
     scrollBeyondLastLine: false
   });
+  loadProgramFromUrl();
 });
 
 runBtn.addEventListener("click", runProgram);
@@ -171,8 +172,18 @@ function stopProgram() {
 }
 
 function shareProgram() {
-  // STUB: full share-URL flow lands Day 5.
-  log("Share lands Day 5.");
+  if (!editor) return;
+  const source = editor.getValue();
+  const title = window.prompt("Name this program", "My G-Basic game") || "My G-Basic game";
+  const params = new URLSearchParams();
+  params.set("code", encodeProgram(source));
+  params.set("title", title);
+  const url = new URL(window.location.href);
+  url.hash = params.toString();
+  navigator.clipboard?.writeText(url.toString()).then(
+    () => log("Share link copied."),
+    () => log(url.toString())
+  );
 }
 
 function log(msg) {
@@ -392,4 +403,33 @@ function loadLessonProgress() {
 
 function saveLessonProgress() {
   localStorage.setItem(LESSON_PROGRESS_KEY, JSON.stringify([...lessonProgress]));
+}
+
+function loadProgramFromUrl() {
+  if (!editor || !window.location.hash.startsWith("#code=")) return;
+  const params = new URLSearchParams(window.location.hash.slice(1));
+  const encoded = params.get("code");
+  if (!encoded) return;
+  try {
+    editor.setValue(decodeProgram(encoded));
+    const title = params.get("title");
+    if (title) log(`Opened shared program: ${title}`);
+  } catch (e) {
+    log(`Could not open shared program: ${e.message}`);
+  }
+}
+
+function encodeProgram(source) {
+  const bytes = new TextEncoder().encode(source);
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+
+function decodeProgram(encoded) {
+  const padded = encoded.replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(encoded.length / 4) * 4, "=");
+  const binary = atob(padded);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return new TextDecoder().decode(bytes);
 }

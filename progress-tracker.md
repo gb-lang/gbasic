@@ -8,12 +8,25 @@
 
 | Field | Value |
 |-------|-------|
-| current_day | 4 |
+| current_day | 5 |
 | current_phase | day_done |
 | gate_status | awaiting_review |
-| last_pr | pending (Day 4 — tutorial track) |
-| last_tick | 2026-05-15 — Day 4: six lessons, lesson panel, starter/solution loading |
+| last_pr | pending (Day 5 — sharing + smoke tests) |
+| last_tick | 2026-05-15 — Day 5: share URLs, canonical game checks, lesson fixture checks |
 | blocker | — |
+
+**Day 5 — done:**
+- Share button now encodes the editor program into the URL hash as `#code=...&title=...`
+- Shared URLs load back into the editor on page open
+- Share flow supports non-ASCII source via `TextEncoder`/`TextDecoder`
+- Optional title prompt included in the share URL
+- Added `compiler/cli/tests/canonical_games.rs` to type-check `pong.gb`, `flappy.gb`, and `angrybirds.gb`
+- Added `compiler/cli/tests/lesson_fixtures.rs` to type-check all six starter/solution lesson programs
+
+**Day 6 — next:**
+- Landing polish, inline compiler errors, loading states, mobile fallback refinement
+- Anonymous telemetry endpoint and compile-service rate limiting
+- README hosted-playground placement and deployment notes
 
 **Day 4 — done:**
 - Added six lesson markdown files under `playground/lessons/`
@@ -23,11 +36,6 @@
 - Supports `#/learn/N` hash routes and also recognizes `/learn/N` when hosted with a fallback
 - Lesson completion is stored locally in `localStorage`
 - Lesson code loads directly into the Monaco editor
-
-**Day 5 — next:**
-- Share URL encoding and fork/open behavior
-- Canonical game smoke-test scaffolding for `pong.gb`, `flappy.gb`, `angrybirds.gb`
-- CI wiring for lesson fixtures and canonical smoke checks where the environment supports LLVM 18
 
 **Day 3 — done:**
 - Added a CC0 starter asset pack with 15 generated sprites and 10 generated sound effects

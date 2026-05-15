@@ -296,6 +296,39 @@ function ensureCanvas() {
 
 function colorStr(r, g, b) { return `rgb(${r},${g},${b})`; }
 
+function configureGBasicRuntime(options = {}) {
+  if (typeof options.assetSpriteRoot === "string") state.assetSpriteRoot = options.assetSpriteRoot;
+  if (typeof options.assetSoundRoot === "string") state.assetSoundRoot = options.assetSoundRoot;
+}
+
+function resetRuntimeState() {
+  state.canvas = null;
+  state.ctx = null;
+  state.width = 800;
+  state.height = 600;
+  state.initialized = false;
+  state.keys.clear();
+  state.mouseX = 0;
+  state.mouseY = 0;
+  state.mouseClicked = false;
+  state.memory = null;
+  state.memoryMap.clear();
+  state.objects = [];
+  state.arrays = [];
+  state.frameStart = 0;
+  state.frameDt = 16.67;
+  state.printBuffer = "";
+  state.outputDiv = null;
+  state.wasmExports = null;
+  state.sprites = [];
+  state.asyncify = {
+    dataAddr: 0,
+    dataStart: 0,
+    dataEnd: 0,
+    sleeping: false,
+  };
+}
+
 // ---- Sprite helpers ----
 // Asynchronous load: returns a handle synchronously, image streams in.
 // Drawing before the image finishes is a silent no-op (first frame might
@@ -314,6 +347,7 @@ function loadSpriteByName(name) {
       return;
     }
     const img = new Image();
+    img.decoding = "async";
     img.onload = () => { sprite.image = img; sprite.ready = true; };
     img.onerror = () => { attempt++; tryNext(); };
     img.src = candidates[attempt];
@@ -534,7 +568,7 @@ function buildImports(memory) {
       },
       runtime_screen_sprite_scale(id, scale) {
         const s = state.sprites[N(id)];
-        if (s) s.scale = scale;
+        if (s) s.scale = Math.max(0, scale);
         return I(N(id));
       },
       runtime_screen_sprite_draw(id) {
@@ -700,13 +734,12 @@ function buildImports(memory) {
   };
 }
 
-async function loadAndRun(wasmUrl) {
+async function loadAndRunBytes(bytes) {
+  resetRuntimeState();
   const memory = new WebAssembly.Memory({ initial: 32, maximum: 256 });
   const imports = buildImports(memory);
   imports.env.memory = memory;
 
-  const response = await fetch(wasmUrl);
-  const bytes = await response.arrayBuffer();
   const { instance } = await WebAssembly.instantiate(bytes, imports);
 
   // Use WASM's own memory if exported
@@ -771,5 +804,11 @@ async function loadAndRun(wasmUrl) {
     console.error("[gbasic] Error:", e);
     appendOutput("ERROR: " + e.message + "\n");
   }
+}
+
+async function loadAndRun(wasmUrl) {
+  const response = await fetch(wasmUrl);
+  const bytes = await response.arrayBuffer();
+  return loadAndRunBytes(bytes);
 }
 "##;

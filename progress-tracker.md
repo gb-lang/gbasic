@@ -12,7 +12,7 @@
 | current_phase | day_done |
 | gate_status | awaiting_review |
 | last_pr | #6 (Day 2 — awaiting Chibueze) |
-| last_tick | 2026-05-11 — Day 2 morning+afternoon: web runtime sprite + sound + small playground message update |
+| last_tick | 2026-05-15 — Day 2 corrected: web runtime sprite + sound plus real playground iframe execution |
 | blocker | — |
 
 **Day 2 — done:**
@@ -23,6 +23,10 @@
 - `runtime_sound_effect_play` (web): plays buffered sound through a per-call `GainNode`; lazy `AudioContext.resume()` for autoplay-policy safety
 - `runtime_sound_effect_volume` (web): name-keyed `state.soundVolumes` map applied at play time
 - `state.assetSpriteRoot` / `assetSoundRoot` are host-overridable so the playground can point to its own asset dir
+- `loadAndRunBytes(wasmBytes)` runtime entrypoint added so the playground can execute compile-service responses without writing a temporary `.wasm` URL
+- Playground Run now mounts each compiled program in a fresh sandboxed iframe and calls the returned runtime + WASM bundle immediately
+- Playground Stop removes the iframe, which tears down the running WASM instance, animation loop, and audio context
+- The stale "runtime wiring lands Day 4" placeholder was removed; Day 4 can build lessons on top of the same sandbox runner
 
 `cargo check -p gbasic-irgen --no-default-features` clean.
 
@@ -33,7 +37,7 @@
 - `IO.read_file` web stub intentionally left returning empty
 
 **Playground execution wiring (Day 1 carryover):**
-- Deferred to Day 4 where it stacks naturally with the lesson runner's iframe sandbox. The playground now logs "sandboxed runner lands Day 4" instead of the stale "Day 2" message.
+- Completed in Day 2 correction. The playground now executes compile-service bundles in a per-run iframe sandbox.
 
 **Day 3 — next:**
 - Curate 15 Kenney CC0 sprites + 10 sounds; drop into `assets/{sprites,sounds}/`

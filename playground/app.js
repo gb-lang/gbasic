@@ -2,9 +2,7 @@
 //
 // Sends source to the compile service (services/compile/) which returns
 // a wasm bundle + runtime.js. The playground instantiates that locally
-// and runs it against the canvas. The real WASM runtime wiring (sprite
-// + sound) lands Day 2; for now successful compiles are reported and
-// the wasm size is logged so the round-trip is observable.
+// in a per-run iframe sandbox and runs it against the canvas.
 
 const COMPILE_ENDPOINT =
   (typeof window !== "undefined" && window.__GBASIC_COMPILE_URL) ||
@@ -24,12 +22,14 @@ const KEYWORDS = [
 
 let editor = null;
 let running = false;
+let runnerFrame = null;
 
 const runBtn = document.getElementById("run-btn");
 const stopBtn = document.getElementById("stop-btn");
 const shareBtn = document.getElementById("share-btn");
 const canvas = document.getElementById("canvas");
 const consoleEl = document.getElementById("console");
+const runnerHost = document.getElementById("runner-host");
 
 require.config({
   paths: { vs: "https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs" }
@@ -118,15 +118,10 @@ async function runProgram() {
 
   const wasmBytes = base64ToBytes(result.wasm);
   log(`✓ compiled (${wasmBytes.length} bytes wasm, ${result.js.length} chars js)`);
-  log("Runtime is real (sprite + sound landed Day 2); per-program iframe");
-  log("sandbox + actual playback lands Day 4 alongside the lesson runner.");
+  log("Starting sandboxed runtime…");
 
-  ctx.fillStyle = "#cdd6f4";
-  ctx.font = "20px sans-serif";
-  ctx.fillText("compile OK — sandboxed runner lands Day 4", 40, 60);
-
+  mountRunner(result.js, result.wasm);
   canvas.focus();
-  finishRun();
 }
 
 function finishRun() {
@@ -143,7 +138,7 @@ function base64ToBytes(b64) {
 }
 
 function stopProgram() {
-  // STUB: real stop arrives once WASM is wired in (Day 2).
+  unmountRunner();
   running = false;
   runBtn.disabled = false;
   stopBtn.disabled = true;
@@ -160,6 +155,74 @@ function log(msg) {
   consoleEl.scrollTop = consoleEl.scrollHeight;
 }
 
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+function mountRunner(runtimeJs, wasmBase64) {
+  unmountRunner();
+
+  const spriteRoot = new URL("assets/sprites/", window.location.href).href;
+  const soundRoot = new URL("assets/sounds/", window.location.href).href;
+  const html = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <style>
+    html, body { margin: 0; height: 100%; overflow: hidden; background: #1e1e2e; color: #cdd6f4; font-family: system-ui, sans-serif; }
+    #canvas { width: 100%; height: calc(100% - 84px); display: block; outline: none; background: #1e1e2e; }
+    #output { height: 84px; margin: 0; padding: 8px; overflow: auto; background: #181825; color: #a6e3a1; font: 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+  <canvas id="canvas" width="800" height="600" tabindex="0"></canvas>
+  <pre id="output"></pre>
+  <script>
+    window.onerror = function(msg, src, line) {
+      document.getElementById("output").textContent += "ERROR: " + msg + " at line " + line + "\\n";
+    };
+  </script>
+  <script>${escapeScript(runtimeJs)}</script>
+  <script>
+    function base64ToBytes(b64) {
+      const bin = atob(b64);
+      const out = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+      return out;
+    }
+
+    if (typeof configureGBasicRuntime === "function") {
+      configureGBasicRuntime({
+        assetSpriteRoot: ${JSON.stringify(spriteRoot)},
+        assetSoundRoot: ${JSON.stringify(soundRoot)}
+      });
+    }
+
+    loadAndRunBytes(base64ToBytes(${JSON.stringify(wasmBase64)}))
+      .then(() => document.getElementById("canvas").focus())
+      .catch((e) => {
+        document.getElementById("output").textContent += "LOAD ERROR: " + e.message + "\\n";
+        console.error(e);
+      });
+  </script>
+</body>
+</html>`;
+
+  runnerFrame = document.createElement("iframe");
+  runnerFrame.title = "G-Basic program output";
+  runnerFrame.setAttribute("sandbox", "allow-scripts");
+  runnerFrame.srcdoc = html;
+  runnerHost.replaceChildren(runnerFrame);
+  runnerFrame.addEventListener("load", () => {
+    log("Runtime started. Click the canvas to focus keyboard input.");
+  }, { once: true });
+}
+
+function unmountRunner() {
+  if (!runnerFrame) return;
+  runnerFrame.remove();
+  runnerFrame = null;
+  runnerHost.replaceChildren(canvas);
+}
+
+function escapeScript(js) {
+  return js
+    .replace(/<\/script/gi, "<\\/script")
+    .replace(/<!--/g, "<\\!--");
 }

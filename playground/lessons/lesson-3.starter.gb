@@ -1,0 +1,9 @@
+let paddle = rect(120, 20)
+paddle.position = point(340, 540)
+paddle.color = blue
+
+while true {
+    clear(15, 20, 35)
+    if key("left") { paddle.position.x = paddle.position.x - 6 }
+    if key("right") { paddle.position.x = paddle.position.x + 6 }
+}

@@ -8,12 +8,26 @@
 
 | Field | Value |
 |-------|-------|
-| current_day | 3 |
+| current_day | 4 |
 | current_phase | day_done |
 | gate_status | awaiting_review |
-| last_pr | pending (Day 3 — asset library + Asset namespace) |
-| last_tick | 2026-05-15 — Day 3: CC0 starter assets, Asset.Sprite/Sound, asset picker |
+| last_pr | pending (Day 4 — tutorial track) |
+| last_tick | 2026-05-15 — Day 4: six lessons, lesson panel, starter/solution loading |
 | blocker | — |
+
+**Day 4 — done:**
+- Added six lesson markdown files under `playground/lessons/`
+- Added starter and solution `.gb` fixtures for each lesson
+- Added `playground/lessons/manifest.json`
+- Playground now has a lesson panel with title, goal, progress dots, Prev/Next, Load starter, Show solution, and Done actions
+- Supports `#/learn/N` hash routes and also recognizes `/learn/N` when hosted with a fallback
+- Lesson completion is stored locally in `localStorage`
+- Lesson code loads directly into the Monaco editor
+
+**Day 5 — next:**
+- Share URL encoding and fork/open behavior
+- Canonical game smoke-test scaffolding for `pong.gb`, `flappy.gb`, `angrybirds.gb`
+- CI wiring for lesson fixtures and canonical smoke checks where the environment supports LLVM 18
 
 **Day 3 — done:**
 - Added a CC0 starter asset pack with 15 generated sprites and 10 generated sound effects
@@ -26,11 +40,6 @@
 - Desktop runtime resolves simple sprite/sound names against bundled `assets/` fallbacks
 - Playground asset picker loads the manifest and inserts `sprite("hero")` / `play("jump")` snippets
 - `examples/sprite_demo.gb` and `examples/sound_demo.gb` now use bundled name-based assets
-
-**Day 4 — next:**
-- Add 6 in-playground lessons from hello screen to first game
-- Lesson runner UI, starter/solution loading, `/learn/N` routes, local completion state
-- Add lesson smoke-test fixtures
 
 **Day 2 — done:**
 - `runtime_screen_sprite_load` (web): async fetch with `.png` / `.jpg` / `.jpeg` candidates from `assets/sprites/<name>`; cached by handle index in `state.sprites[]`; drawing before load completes is a silent no-op

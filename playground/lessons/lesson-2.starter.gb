@@ -1,0 +1,9 @@
+let ball = circle(18)
+ball.position = point(100, 100)
+ball.color = yellow
+ball.velocity = point(3, 2)
+ball.bounces = true
+
+while true {
+    clear(20, 24, 38)
+}

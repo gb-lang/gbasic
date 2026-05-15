@@ -48,7 +48,106 @@ main {
 
 #editor-pane, #output-pane { overflow: hidden; min-width: 0; }
 
-#editor { width: 100%; height: 100%; }
+#editor-pane {
+  display: flex;
+  flex-direction: column;
+}
+
+#lesson-panel {
+  max-height: 280px;
+  padding: 0.85rem 1rem;
+  overflow: auto;
+  background: #11111b;
+  border-bottom: 1px solid #313244;
+}
+
+.lesson-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: start;
+}
+
+#lesson-kicker {
+  color: #a6adc8;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+#lesson-title {
+  margin-top: 0.15rem;
+  color: #f5e0dc;
+  font-size: 1.05rem;
+  line-height: 1.25;
+}
+
+#lesson-goal {
+  margin-top: 0.45rem;
+  color: #cdd6f4;
+  font-size: 0.9rem;
+}
+
+#lesson-body {
+  margin-top: 0.45rem;
+  color: #bac2de;
+  font-size: 0.85rem;
+  line-height: 1.45;
+}
+
+#lesson-body code {
+  color: #a6e3a1;
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+}
+
+#lesson-body pre {
+  display: none;
+}
+
+#lesson-dots {
+  display: flex;
+  gap: 0.3rem;
+  padding-top: 0.2rem;
+}
+
+.lesson-dot {
+  width: 0.65rem;
+  height: 0.65rem;
+  border-radius: 50%;
+  background: #45475a;
+}
+
+.lesson-dot.active { background: #89b4fa; }
+.lesson-dot.done { background: #a6e3a1; }
+
+.lesson-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: 0.65rem;
+}
+
+.lesson-actions button {
+  padding: 0.35rem 0.5rem;
+  border: 1px solid #45475a;
+  border-radius: 4px;
+  background: #313244;
+  color: #cdd6f4;
+  cursor: pointer;
+  font-size: 0.78rem;
+}
+
+.lesson-actions button:hover:not(:disabled) {
+  border-color: #89b4fa;
+  color: #89b4fa;
+}
+
+.lesson-actions button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+#editor { width: 100%; flex: 1; min-height: 0; }
 
 #output-pane {
   display: flex;

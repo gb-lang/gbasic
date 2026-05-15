@@ -1,0 +1,23 @@
+let paddle = rect(140, 18)
+paddle.position = point(330, 548)
+paddle.color = blue
+paddle.solid = true
+
+let ball = circle(14)
+ball.position = point(120, 120)
+ball.velocity = point(4, 3)
+ball.color = yellow
+ball.bounces = true
+
+let score = 0
+
+while true {
+    clear(10, 14, 30)
+    if key("left") { paddle.position.x = paddle.position.x - 7 }
+    if key("right") { paddle.position.x = paddle.position.x + 7 }
+    if ball.collides(paddle) {
+        score = score + 1
+        play("coin")
+    }
+    print("Score: {score}").at(20, 30)
+}

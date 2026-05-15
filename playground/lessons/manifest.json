@@ -1,0 +1,8 @@
+[
+  { "id": 1, "title": "Hello, screen", "goal": "Print text and clear the canvas", "starter": "lessons/lesson-1.starter.gb", "solution": "lessons/lesson-1.solution.gb", "markdown": "lessons/lesson-1.md" },
+  { "id": 2, "title": "Make it move", "goal": "Move a shape with runtime physics", "starter": "lessons/lesson-2.starter.gb", "solution": "lessons/lesson-2.solution.gb", "markdown": "lessons/lesson-2.md" },
+  { "id": 3, "title": "Listen for keys", "goal": "Control an object with keyboard input", "starter": "lessons/lesson-3.starter.gb", "solution": "lessons/lesson-3.solution.gb", "markdown": "lessons/lesson-3.md" },
+  { "id": 4, "title": "Bouncing", "goal": "Use bounce and collision behavior", "starter": "lessons/lesson-4.starter.gb", "solution": "lessons/lesson-4.solution.gb", "markdown": "lessons/lesson-4.md" },
+  { "id": 5, "title": "Score and text", "goal": "Show score text on the canvas", "starter": "lessons/lesson-5.starter.gb", "solution": "lessons/lesson-5.solution.gb", "markdown": "lessons/lesson-5.md" },
+  { "id": 6, "title": "Your first game", "goal": "Put everything together", "starter": "lessons/lesson-6.starter.gb", "solution": "lessons/lesson-6.solution.gb", "markdown": "lessons/lesson-6.md" }
+]

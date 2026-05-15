@@ -17,6 +17,24 @@
   </header>
   <main>
     <section id="editor-pane">
+      <aside id="lesson-panel" aria-label="Lessons">
+        <div class="lesson-header">
+          <div>
+            <span id="lesson-kicker">Lesson 1 of 6</span>
+            <h1 id="lesson-title">Hello, screen</h1>
+          </div>
+          <div id="lesson-dots" aria-label="Lesson progress"></div>
+        </div>
+        <p id="lesson-goal"></p>
+        <div id="lesson-body"></div>
+        <div class="lesson-actions">
+          <button id="prev-lesson-btn" type="button">Prev</button>
+          <button id="load-starter-btn" type="button">Load starter</button>
+          <button id="show-solution-btn" type="button">Show solution</button>
+          <button id="complete-lesson-btn" type="button">Done</button>
+          <button id="next-lesson-btn" type="button">Next</button>
+        </div>
+      </aside>
       <div id="editor"></div>
     </section>
     <section id="output-pane">

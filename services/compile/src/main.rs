@@ -108,9 +108,12 @@ async fn main() {
     let addr = format!("0.0.0.0:{port}");
     let listener = tokio::net::TcpListener::bind(&addr).await.expect("bind");
     tracing::info!(%addr, "compile-service listening");
-    axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>())
-        .await
-        .expect("serve");
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .await
+    .expect("serve");
 }
 
 async fn compile(
@@ -119,7 +122,10 @@ async fn compile(
     Json(req): Json<CompileRequest>,
 ) -> (StatusCode, Json<CompileResponse>) {
     if !allow_request(&state, addr.ip().to_string()) {
-        return error(StatusCode::TOO_MANY_REQUESTS, "rate limit exceeded (10 compiles/min)");
+        return error(
+            StatusCode::TOO_MANY_REQUESTS,
+            "rate limit exceeded (10 compiles/min)",
+        );
     }
 
     if req.source.len() > MAX_SOURCE_BYTES {

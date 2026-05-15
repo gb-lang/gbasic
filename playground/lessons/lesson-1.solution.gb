@@ -1,0 +1,2 @@
+clear(30, 40, 90)
+print("Hello from G-Basic!")

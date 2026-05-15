@@ -10,11 +10,23 @@
   <header>
     <div class="logo">G-Basic</div>
     <div class="actions">
+      <a id="learn-link" href="#/learn/1">Start Learning</a>
       <button id="run-btn" type="button">▶ Run</button>
       <button id="stop-btn" type="button" disabled>■ Stop</button>
       <button id="share-btn" type="button">⇪ Share</button>
     </div>
   </header>
+  <section id="welcome-band">
+    <div>
+      <strong>Make your first game in the browser.</strong>
+      <span>Write G-Basic, press Run, and share the result.</span>
+    </div>
+    <div class="preview-strip" aria-label="Example previews">
+      <span class="preview-card">Pong</span>
+      <span class="preview-card">Flappy</span>
+      <span class="preview-card">Sprites</span>
+    </div>
+  </section>
   <main>
     <section id="editor-pane">
       <aside id="lesson-panel" aria-label="Lessons">
@@ -35,6 +47,7 @@
           <button id="next-lesson-btn" type="button">Next</button>
         </div>
       </aside>
+      <pre id="error-panel" aria-live="polite"></pre>
       <div id="editor"></div>
     </section>
     <section id="output-pane">

@@ -7,6 +7,9 @@
 const COMPILE_ENDPOINT =
   (typeof window !== "undefined" && window.__GBASIC_COMPILE_URL) ||
   "http://localhost:8080/compile";
+const TELEMETRY_ENDPOINT =
+  (typeof window !== "undefined" && window.__GBASIC_TELEMETRY_URL) ||
+  COMPILE_ENDPOINT.replace(/\/compile$/, "/telemetry");
 const ASSET_MANIFEST_URL = "assets/manifest.json";
 const LESSON_MANIFEST_URL = "lessons/manifest.json";
 const LESSON_PROGRESS_KEY = "gbasic.lessonProgress.v1";
@@ -36,6 +39,7 @@ const shareBtn = document.getElementById("share-btn");
 const canvas = document.getElementById("canvas");
 const consoleEl = document.getElementById("console");
 const runnerHost = document.getElementById("runner-host");
+const errorPanel = document.getElementById("error-panel");
 const spriteAssetsEl = document.getElementById("sprite-assets");
 const soundAssetsEl = document.getElementById("sound-assets");
 const lessonKickerEl = document.getElementById("lesson-kicker");
@@ -106,7 +110,9 @@ async function runProgram() {
   running = true;
   runBtn.disabled = true;
   stopBtn.disabled = false;
+  runBtn.textContent = "Compiling…";
   consoleEl.textContent = "";
+  setError("");
 
   const ctx = canvas.getContext("2d");
   ctx.fillStyle = "#1e1e2e";
@@ -138,6 +144,8 @@ async function runProgram() {
   if (result.errors) {
     log("✖ compile failed:");
     log(result.errors);
+    setError(result.errors);
+    sendTelemetry("compile_failed");
     finishRun();
     return;
   }
@@ -145,6 +153,7 @@ async function runProgram() {
   const wasmBytes = base64ToBytes(result.wasm);
   log(`✓ compiled (${wasmBytes.length} bytes wasm, ${result.js.length} chars js)`);
   log("Starting sandboxed runtime…");
+  sendTelemetry("compile_succeeded");
 
   mountRunner(result.js, result.wasm);
   canvas.focus();
@@ -154,6 +163,7 @@ function finishRun() {
   running = false;
   runBtn.disabled = false;
   stopBtn.disabled = true;
+  runBtn.textContent = "▶ Run";
 }
 
 function base64ToBytes(b64) {
@@ -368,6 +378,7 @@ function completeCurrentLesson() {
   saveLessonProgress();
   renderLessonDots();
   completeLessonBtn.textContent = "Done ✓";
+  sendTelemetry("lesson_completed", { lesson: currentLesson });
 }
 
 async function fetchText(url) {
@@ -432,4 +443,16 @@ function decodeProgram(encoded) {
   const bytes = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
   return new TextDecoder().decode(bytes);
+}
+
+function setError(message) {
+  if (!errorPanel) return;
+  errorPanel.textContent = message || "";
+  errorPanel.classList.toggle("visible", Boolean(message));
+}
+
+function sendTelemetry(event, data = {}) {
+  if (!navigator.sendBeacon) return;
+  const payload = JSON.stringify({ event, data, ts: new Date().toISOString() });
+  navigator.sendBeacon(TELEMETRY_ENDPOINT, new Blob([payload], { type: "application/json" }));
 }

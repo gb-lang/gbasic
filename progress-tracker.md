@@ -8,12 +8,26 @@
 
 | Field | Value |
 |-------|-------|
-| current_day | 5 |
+| current_day | 6 |
 | current_phase | day_done |
 | gate_status | awaiting_review |
-| last_pr | pending (Day 5 — sharing + smoke tests) |
-| last_tick | 2026-05-15 — Day 5: share URLs, canonical game checks, lesson fixture checks |
+| last_pr | pending (Day 6 — polish + deploy readiness) |
+| last_tick | 2026-05-15 — Day 6: welcome band, errors/loading, telemetry, rate limit |
 | blocker | — |
+
+**Day 6 — done:**
+- Added compact welcome band with Start Learning link and example preview chips
+- Added inline compiler error panel above the editor
+- Added visible Run button loading state while compiling
+- Refined mobile fallback behavior around the new welcome band/header
+- Added anonymous `POST /telemetry` endpoint to the compile service
+- Added client telemetry for compile success/failure and lesson completion
+- Added compile-service rate limit: 10 compile requests/minute/IP
+- Updated README and compile-service docs with playground/deploy-readiness notes
+
+**Day 7 — next:**
+- Launch checklist, ops handoff, rollback/hotfix notes
+- Browser/Chromebook/manual QA checklist and v0.3.0-kids tag instructions
 
 **Day 5 — done:**
 - Share button now encodes the editor program into the URL hash as `#code=...&title=...`
@@ -22,11 +36,6 @@
 - Optional title prompt included in the share URL
 - Added `compiler/cli/tests/canonical_games.rs` to type-check `pong.gb`, `flappy.gb`, and `angrybirds.gb`
 - Added `compiler/cli/tests/lesson_fixtures.rs` to type-check all six starter/solution lesson programs
-
-**Day 6 — next:**
-- Landing polish, inline compiler errors, loading states, mobile fallback refinement
-- Anonymous telemetry endpoint and compile-service rate limiting
-- README hosted-playground placement and deployment notes
 
 **Day 4 — done:**
 - Added six lesson markdown files under `playground/lessons/`

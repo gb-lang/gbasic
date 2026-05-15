@@ -18,6 +18,26 @@ header {
   height: 60px;
 }
 
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.actions a {
+  padding: 0.5rem 0.75rem;
+  border: 1px solid #45475a;
+  border-radius: 6px;
+  color: #cdd6f4;
+  text-decoration: none;
+  font-size: 0.9rem;
+}
+
+.actions a:hover {
+  border-color: #89b4fa;
+  color: #89b4fa;
+}
+
 .logo {
   font-weight: 700;
   font-size: 1.25rem;
@@ -25,7 +45,6 @@ header {
 }
 
 .actions button {
-  margin-left: 0.5rem;
   padding: 0.5rem 1rem;
   font-size: 1rem;
   background: #585b70;
@@ -40,10 +59,52 @@ header {
 .actions #run-btn { background: #a6e3a1; color: #1e1e2e; font-weight: 600; }
 .actions #stop-btn { background: #f38ba8; color: #1e1e2e; }
 
+#welcome-band {
+  height: 76px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.75rem 1.5rem;
+  background: #11111b;
+  border-bottom: 1px solid #313244;
+}
+
+#welcome-band strong,
+#welcome-band span {
+  display: block;
+}
+
+#welcome-band strong {
+  color: #f5e0dc;
+  font-size: 1.05rem;
+}
+
+#welcome-band span {
+  color: #bac2de;
+  margin-top: 0.15rem;
+}
+
+.preview-strip {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.preview-card {
+  min-width: 86px;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid #45475a;
+  border-radius: 6px;
+  background: #1e1e2e;
+  color: #a6e3a1;
+  text-align: center;
+  font-weight: 700;
+}
+
 main {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  height: calc(100vh - 60px);
+  height: calc(100vh - 136px);
 }
 
 #editor-pane, #output-pane { overflow: hidden; min-width: 0; }
@@ -102,6 +163,24 @@ main {
 
 #lesson-body pre {
   display: none;
+}
+
+#error-panel {
+  display: none;
+  margin: 0;
+  padding: 0.75rem 1rem;
+  max-height: 150px;
+  overflow: auto;
+  background: #2b1720;
+  color: #f38ba8;
+  border-bottom: 1px solid #5b2738;
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.82rem;
+  white-space: pre-wrap;
+}
+
+#error-panel.visible {
+  display: block;
 }
 
 #lesson-dots {
@@ -245,6 +324,9 @@ main {
 
 @media (max-width: 800px) {
   #mobile-warning { display: block; }
+  #welcome-band { display: none; }
+  header { height: auto; gap: 0.75rem; align-items: flex-start; }
+  .actions { flex-wrap: wrap; justify-content: flex-end; }
   main { grid-template-columns: 1fr; grid-template-rows: 1fr 1fr; }
   #output-pane { border-left: none; border-top: 1px solid #313244; }
 }

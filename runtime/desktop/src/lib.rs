@@ -8,6 +8,7 @@ use sdl2::rect::{Point, Rect};
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::ffi::{CStr, CString};
+use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 // ─── Object System ───
@@ -448,7 +449,8 @@ pub extern "C" fn runtime_screen_sprite_load(path: *const std::ffi::c_char) -> i
         Some(s) => s,
         None => return -1,
     };
-    let surface = match sdl2::surface::Surface::load_bmp(p) {
+    let sprite_path = resolve_asset_path(p, "assets/sprites", &["bmp"]);
+    let surface = match sdl2::surface::Surface::load_bmp(sprite_path.as_path()) {
         Ok(s) => s,
         Err(_) => return -1,
     };
@@ -669,18 +671,20 @@ mod sound_mixer {
             Some(s) => s,
             None => return 0,
         };
+        let resolved = resolve_asset_path(p, "assets/sounds", &["wav"]);
+        let key = resolved.to_string_lossy().to_string();
         SOUND_CHUNKS.with(|chunks| {
             let mut chunks = chunks.borrow_mut();
-            if chunks.contains_key(p) {
+            if chunks.contains_key(&key) {
                 return 1;
             }
-            match mixer::Chunk::from_file(p) {
+            match mixer::Chunk::from_file(&resolved) {
                 Ok(chunk) => {
-                    chunks.insert(p.to_string(), chunk);
+                    chunks.insert(key, chunk);
                     1
                 }
                 Err(e) => {
-                    eprintln!("[sound] failed to load \"{p}\": {e}");
+                    eprintln!("[sound] failed to load \"{}\": {e}", resolved.display());
                     0
                 }
             }
@@ -693,16 +697,18 @@ mod sound_mixer {
             Some(s) => s,
             None => return,
         };
+        let resolved = resolve_asset_path(p, "assets/sounds", &["wav"]);
+        let key = resolved.to_string_lossy().to_string();
         SOUND_CHUNKS.with(|chunks| {
             let chunks = chunks.borrow();
-            if let Some(chunk) = chunks.get(p) {
+            if let Some(chunk) = chunks.get(&key) {
                 let _ = mixer::Channel::all().play(chunk, 0);
             } else {
                 drop(chunks);
                 effect_load(path);
                 SOUND_CHUNKS.with(|c| {
                     let c = c.borrow();
-                    if let Some(chunk) = c.get(p) {
+                    if let Some(chunk) = c.get(&key) {
                         let _ = mixer::Channel::all().play(chunk, 0);
                     }
                 });
@@ -715,9 +721,11 @@ mod sound_mixer {
             Some(s) => s,
             None => return,
         };
+        let resolved = resolve_asset_path(p, "assets/sounds", &["wav"]);
+        let key = resolved.to_string_lossy().to_string();
         SOUND_CHUNKS.with(|chunks| {
             let mut chunks = chunks.borrow_mut();
-            if let Some(chunk) = chunks.get_mut(p) {
+            if let Some(chunk) = chunks.get_mut(&key) {
                 chunk.set_volume((volume.clamp(0.0, 1.0) * 128.0) as i32);
             }
         });
@@ -783,6 +791,32 @@ pub extern "C" fn runtime_asset_load(path: *const std::ffi::c_char) -> i64 {
     let p = unsafe { read_cstr(path) }.unwrap_or("?");
     eprintln!("[asset] load(\"{p}\") (stub — asset caching not yet implemented)");
     0
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn runtime_asset_sprite(path: *const std::ffi::c_char) -> i64 {
+    runtime_screen_sprite_load(path)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn runtime_asset_sound(path: *const std::ffi::c_char) -> i64 {
+    runtime_sound_effect_load(path)
+}
+
+fn resolve_asset_path(input: &str, root: &str, extensions: &[&str]) -> PathBuf {
+    let path = Path::new(input);
+    if path.exists() || path.extension().is_some() || input.contains('/') || input.contains('\\') {
+        return path.to_path_buf();
+    }
+
+    for ext in extensions {
+        let candidate = Path::new(root).join(format!("{input}.{ext}"));
+        if candidate.exists() {
+            return candidate;
+        }
+    }
+
+    path.to_path_buf()
 }
 
 // ─── Memory namespace ───

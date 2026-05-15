@@ -1,0 +1,148 @@
+{
+  "license": "CC0-1.0",
+  "source": "Generated in-repo for the G-Basic kids-launch starter pack.",
+  "sprites": [
+    {
+      "name": "hero",
+      "category": "character",
+      "file": "sprites/hero.png",
+      "desktopFile": "sprites/hero.bmp"
+    },
+    {
+      "name": "robot",
+      "category": "character",
+      "file": "sprites/robot.png",
+      "desktopFile": "sprites/robot.bmp"
+    },
+    {
+      "name": "cat",
+      "category": "character",
+      "file": "sprites/cat.png",
+      "desktopFile": "sprites/cat.bmp"
+    },
+    {
+      "name": "dog",
+      "category": "character",
+      "file": "sprites/dog.png",
+      "desktopFile": "sprites/dog.bmp"
+    },
+    {
+      "name": "coin",
+      "category": "object",
+      "file": "sprites/coin.png",
+      "desktopFile": "sprites/coin.bmp"
+    },
+    {
+      "name": "heart",
+      "category": "object",
+      "file": "sprites/heart.png",
+      "desktopFile": "sprites/heart.bmp"
+    },
+    {
+      "name": "star",
+      "category": "object",
+      "file": "sprites/star.png",
+      "desktopFile": "sprites/star.bmp"
+    },
+    {
+      "name": "key",
+      "category": "object",
+      "file": "sprites/key.png",
+      "desktopFile": "sprites/key.bmp"
+    },
+    {
+      "name": "grass",
+      "category": "tile",
+      "file": "sprites/grass.png",
+      "desktopFile": "sprites/grass.bmp"
+    },
+    {
+      "name": "water",
+      "category": "tile",
+      "file": "sprites/water.png",
+      "desktopFile": "sprites/water.bmp"
+    },
+    {
+      "name": "stone",
+      "category": "tile",
+      "file": "sprites/stone.png",
+      "desktopFile": "sprites/stone.bmp"
+    },
+    {
+      "name": "brick",
+      "category": "tile",
+      "file": "sprites/brick.png",
+      "desktopFile": "sprites/brick.bmp"
+    },
+    {
+      "name": "explosion",
+      "category": "effect",
+      "file": "sprites/explosion.png",
+      "desktopFile": "sprites/explosion.bmp"
+    },
+    {
+      "name": "sparkle",
+      "category": "effect",
+      "file": "sprites/sparkle.png",
+      "desktopFile": "sprites/sparkle.bmp"
+    },
+    {
+      "name": "smoke",
+      "category": "effect",
+      "file": "sprites/smoke.png",
+      "desktopFile": "sprites/smoke.bmp"
+    }
+  ],
+  "sounds": [
+    {
+      "name": "jump",
+      "category": "effect",
+      "file": "sounds/jump.wav"
+    },
+    {
+      "name": "coin",
+      "category": "effect",
+      "file": "sounds/coin.wav"
+    },
+    {
+      "name": "hit",
+      "category": "effect",
+      "file": "sounds/hit.wav"
+    },
+    {
+      "name": "explosion",
+      "category": "effect",
+      "file": "sounds/explosion.wav"
+    },
+    {
+      "name": "powerup",
+      "category": "effect",
+      "file": "sounds/powerup.wav"
+    },
+    {
+      "name": "click",
+      "category": "effect",
+      "file": "sounds/click.wav"
+    },
+    {
+      "name": "win",
+      "category": "effect",
+      "file": "sounds/win.wav"
+    },
+    {
+      "name": "lose",
+      "category": "effect",
+      "file": "sounds/lose.wav"
+    },
+    {
+      "name": "beep",
+      "category": "effect",
+      "file": "sounds/beep.wav"
+    },
+    {
+      "name": "swoosh",
+      "category": "effect",
+      "file": "sounds/swoosh.wav"
+    }
+  ]
+}

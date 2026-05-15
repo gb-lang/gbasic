@@ -99,6 +99,8 @@ pub fn js_runtime_function_names() -> Vec<&'static str> {
         "runtime_io_write_file",
         // Asset
         "runtime_asset_load",
+        "runtime_asset_sprite",
+        "runtime_asset_sound",
         // Objects
         "runtime_create_rect",
         "runtime_create_circle",
@@ -296,6 +298,16 @@ function ensureCanvas() {
 
 function colorStr(r, g, b) { return `rgb(${r},${g},${b})`; }
 
+function assetCandidates(root, name, extensions) {
+  const hasPath = name.includes("/") || name.includes("\\");
+  const hasExt = /\.[A-Za-z0-9]+$/.test(name);
+  if (hasPath || hasExt) {
+    if (hasExt) return [name];
+    return extensions.map(ext => `${name}.${ext}`).concat(name);
+  }
+  return extensions.map(ext => `${root}${name}.${ext}`).concat(`${root}${name}`, name);
+}
+
 function configureGBasicRuntime(options = {}) {
   if (typeof options.assetSpriteRoot === "string") state.assetSpriteRoot = options.assetSpriteRoot;
   if (typeof options.assetSoundRoot === "string") state.assetSoundRoot = options.assetSoundRoot;
@@ -336,7 +348,7 @@ function resetRuntimeState() {
 function loadSpriteByName(name) {
   const root = state.assetSpriteRoot;
   // Try common extensions in order; pick whichever the host actually serves.
-  const candidates = [`${root}${name}.png`, `${root}${name}.jpg`, `${root}${name}.jpeg`, `${root}${name}`];
+  const candidates = assetCandidates(root, name, ["png", "jpg", "jpeg"]);
   const sprite = { image: null, x: 0, y: 0, scale: 1, ready: false, error: false, name };
   state.sprites.push(sprite);
   let attempt = 0;
@@ -383,7 +395,7 @@ function loadSoundByName(name) {
   if (state.soundCache.has(name)) return Promise.resolve(state.soundCache.get(name));
   if (state.soundLoading.has(name)) return state.soundLoading.get(name);
   const root = state.assetSoundRoot;
-  const candidates = [`${root}${name}.wav`, `${root}${name}.mp3`, `${root}${name}.ogg`, `${root}${name}`];
+  const candidates = assetCandidates(root, name, ["wav", "mp3", "ogg"]);
   const promise = (async () => {
     for (const url of candidates) {
       try {
@@ -670,6 +682,14 @@ function buildImports(memory) {
 
       // Asset
       runtime_asset_load(ptr) { return I(0); },
+      runtime_asset_sprite(ptr) {
+        ensureCanvas();
+        return I(loadSpriteByName(readCStr(ptr)));
+      },
+      runtime_asset_sound(ptr) {
+        if (ensureAudio()) loadSoundByName(readCStr(ptr));
+        return I(0);
+      },
 
       // Objects (handle=i64, positions=f64, colors=i64)
       runtime_create_rect(w, h) { return I(createObject("rect", { w, h })); },

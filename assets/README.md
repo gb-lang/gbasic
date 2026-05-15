@@ -1,14 +1,20 @@
 # Assets
 
-Default placeholder assets for G-Basic programs.
+Default CC0 starter assets for G-Basic programs.
 
-| File | Description |
-|------|-------------|
-| `beep.wav` | Minimal valid WAV file (short silence). Used as a default/fallback sound effect. |
-| `default_sprite.bmp` | 8x8 white BMP image. Used as a default/fallback sprite. |
+The kids-launch playground and desktop runtime can resolve simple names:
 
-These files are intentionally minimal. They exist so that G-Basic example programs
-that reference `play("beep")` or load a default sprite have something valid to work
-with out of the box, without requiring users to supply their own assets first.
+```gbasic
+let hero = sprite("hero")
+play("jump")
+```
 
-Replace them with your own assets as needed.
+The runtime first tries an explicit file path, then falls back to this bundled
+starter pack:
+
+- `sprites/*.png` for the web playground
+- `sprites/*.bmp` for the desktop SDL runtime
+- `sounds/*.wav` for web and desktop sound effects
+- `manifest.json` for playground discovery and the asset picker
+
+See `CREDITS.md` for the full asset list and license notes.

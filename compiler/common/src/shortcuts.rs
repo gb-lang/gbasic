@@ -67,6 +67,12 @@ pub static SHORTCUTS: &[ShortcutDef] = &[
         description: "Check if a key is pressed",
     },
     ShortcutDef {
+        name: "sprite",
+        namespace: "Asset",
+        prefix_chain: "Sprite",
+        description: "Load a bundled or project sprite by name",
+    },
+    ShortcutDef {
         name: "play",
         namespace: "Sound",
         prefix_chain: "Effect.Play",

@@ -1,7 +1,7 @@
 // Sprite demo — load and move a sprite with arrow keys
 Screen.Init(800, 600)
 
-let sprite = Screen.SpriteLoad("assets/player.bmp")
+let sprite = sprite("hero")
 let x = 400.0
 let y = 300.0
 let speed = 5.0
@@ -16,6 +16,7 @@ while true {
 
     Screen.Clear(50, 50, 60)
     Screen.SpriteAt(sprite, x, y)
+    Screen.SpriteScale(sprite, 2.0)
     Screen.SpriteDraw(sprite)
     Screen.Present()
 

@@ -182,6 +182,16 @@ const state = {
   printBuffer: "",
   outputDiv: null,
   wasmExports: null,
+  // Sprite cache: array of { image, x, y, scale, ready, error }
+  sprites: [],
+  // Audio (lazy-init on first sound call; needs user gesture to resume)
+  audioContext: null,
+  soundCache: null,    // Map<name, AudioBuffer | null>
+  soundLoading: null,  // Map<name, Promise>
+  soundVolumes: null,  // Map<name, number>
+  // Asset path roots (overridable by host page)
+  assetSpriteRoot: "assets/sprites/",
+  assetSoundRoot: "assets/sounds/",
   // Asyncify state — buffer dynamically allocated after WASM loads
   asyncify: {
     dataAddr: 0,
@@ -285,6 +295,128 @@ function ensureCanvas() {
 }
 
 function colorStr(r, g, b) { return `rgb(${r},${g},${b})`; }
+
+function configureGBasicRuntime(options = {}) {
+  if (typeof options.assetSpriteRoot === "string") state.assetSpriteRoot = options.assetSpriteRoot;
+  if (typeof options.assetSoundRoot === "string") state.assetSoundRoot = options.assetSoundRoot;
+}
+
+function resetRuntimeState() {
+  state.canvas = null;
+  state.ctx = null;
+  state.width = 800;
+  state.height = 600;
+  state.initialized = false;
+  state.keys.clear();
+  state.mouseX = 0;
+  state.mouseY = 0;
+  state.mouseClicked = false;
+  state.memory = null;
+  state.memoryMap.clear();
+  state.objects = [];
+  state.arrays = [];
+  state.frameStart = 0;
+  state.frameDt = 16.67;
+  state.printBuffer = "";
+  state.outputDiv = null;
+  state.wasmExports = null;
+  state.sprites = [];
+  state.asyncify = {
+    dataAddr: 0,
+    dataStart: 0,
+    dataEnd: 0,
+    sleeping: false,
+  };
+}
+
+// ---- Sprite helpers ----
+// Asynchronous load: returns a handle synchronously, image streams in.
+// Drawing before the image finishes is a silent no-op (first frame might
+// skip; subsequent frames render normally).
+function loadSpriteByName(name) {
+  const root = state.assetSpriteRoot;
+  // Try common extensions in order; pick whichever the host actually serves.
+  const candidates = [`${root}${name}.png`, `${root}${name}.jpg`, `${root}${name}.jpeg`, `${root}${name}`];
+  const sprite = { image: null, x: 0, y: 0, scale: 1, ready: false, error: false, name };
+  state.sprites.push(sprite);
+  let attempt = 0;
+  const tryNext = () => {
+    if (attempt >= candidates.length) {
+      sprite.error = true;
+      console.warn(`sprite "${name}": no candidate URL resolved`);
+      return;
+    }
+    const img = new Image();
+    img.decoding = "async";
+    img.onload = () => { sprite.image = img; sprite.ready = true; };
+    img.onerror = () => { attempt++; tryNext(); };
+    img.src = candidates[attempt];
+  };
+  tryNext();
+  return state.sprites.length - 1;
+}
+
+// ---- Audio helpers ----
+function ensureAudio() {
+  if (!state.audioContext) {
+    try {
+      state.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      state.soundCache = new Map();
+      state.soundLoading = new Map();
+      state.soundVolumes = new Map();
+    } catch (e) {
+      console.warn("Web Audio unavailable:", e.message);
+      return false;
+    }
+  }
+  // AudioContext starts suspended in modern browsers — only resumes after a
+  // user gesture. The caller (the program's Run click) will already have
+  // triggered one, but we resume defensively in case audio is the first
+  // thing the program does.
+  if (state.audioContext.state === "suspended") {
+    state.audioContext.resume().catch(() => {});
+  }
+  return true;
+}
+
+function loadSoundByName(name) {
+  if (state.soundCache.has(name)) return Promise.resolve(state.soundCache.get(name));
+  if (state.soundLoading.has(name)) return state.soundLoading.get(name);
+  const root = state.assetSoundRoot;
+  const candidates = [`${root}${name}.wav`, `${root}${name}.mp3`, `${root}${name}.ogg`, `${root}${name}`];
+  const promise = (async () => {
+    for (const url of candidates) {
+      try {
+        const res = await fetch(url);
+        if (!res.ok) continue;
+        const arr = await res.arrayBuffer();
+        const buf = await state.audioContext.decodeAudioData(arr);
+        state.soundCache.set(name, buf);
+        return buf;
+      } catch (_) { /* try next */ }
+    }
+    console.warn(`sound "${name}": no candidate URL resolved`);
+    state.soundCache.set(name, null);
+    return null;
+  })();
+  state.soundLoading.set(name, promise);
+  promise.finally(() => state.soundLoading.delete(name));
+  return promise;
+}
+
+function playSoundByName(name) {
+  if (!ensureAudio()) return;
+  loadSoundByName(name).then((buf) => {
+    if (!buf) return;
+    const src = state.audioContext.createBufferSource();
+    src.buffer = buf;
+    const gain = state.audioContext.createGain();
+    const vol = state.soundVolumes.get(name);
+    gain.gain.value = vol == null ? 1.0 : vol;
+    src.connect(gain).connect(state.audioContext.destination);
+    src.start();
+  });
+}
 
 // WASM i64 <-> JS BigInt conversion helpers
 function N(v) { return typeof v === "bigint" ? Number(v) : v; }  // BigInt -> Number
@@ -425,10 +557,27 @@ function buildImports(memory) {
       runtime_screen_height() { ensureCanvas(); return I(state.height); },
       runtime_screen_center_x() { ensureCanvas(); return state.width / 2.0; },
       runtime_screen_center_y() { ensureCanvas(); return state.height / 2.0; },
-      runtime_screen_sprite_load(ptr) { return I(0); },
-      runtime_screen_sprite_at(id, x, y) { return I(N(id)); },
-      runtime_screen_sprite_scale(id, s) { return I(N(id)); },
-      runtime_screen_sprite_draw(id) { },
+      runtime_screen_sprite_load(ptr) {
+        ensureCanvas();
+        return I(loadSpriteByName(readCStr(ptr)));
+      },
+      runtime_screen_sprite_at(id, x, y) {
+        const s = state.sprites[N(id)];
+        if (s) { s.x = N(x); s.y = N(y); }
+        return I(N(id));
+      },
+      runtime_screen_sprite_scale(id, scale) {
+        const s = state.sprites[N(id)];
+        if (s) s.scale = Math.max(0, scale);
+        return I(N(id));
+      },
+      runtime_screen_sprite_draw(id) {
+        const s = state.sprites[N(id)];
+        if (!s || !s.ready || !state.ctx) return;
+        const w = s.image.width * s.scale;
+        const h = s.image.height * s.scale;
+        state.ctx.drawImage(s.image, s.x, s.y, w, h);
+      },
       ensure_screen_init() { ensureCanvas(); },
 
       // Input (returns i64)
@@ -496,9 +645,19 @@ function buildImports(memory) {
           osc.stop(actx.currentTime + N(dur) / 1000);
         } catch(e) {}
       },
-      runtime_sound_effect_load(ptr) { return I(0); },
-      runtime_sound_effect_play(ptr) { },
-      runtime_sound_effect_volume(ptr, vol) { },
+      runtime_sound_effect_load(ptr) {
+        // Fire-and-forget pre-warm of the cache. Returns 0 because the
+        // ABI does not use the handle elsewhere — play/volume key by name.
+        if (ensureAudio()) loadSoundByName(readCStr(ptr));
+        return I(0);
+      },
+      runtime_sound_effect_play(ptr) {
+        playSoundByName(readCStr(ptr));
+      },
+      runtime_sound_effect_volume(ptr, vol) {
+        if (!ensureAudio()) return;
+        state.soundVolumes.set(readCStr(ptr), vol);
+      },
 
       // Memory (i64 val)
       runtime_memory_set(ptr, val) { state.memoryMap.set(readCStr(ptr), N(val)); },
@@ -575,13 +734,12 @@ function buildImports(memory) {
   };
 }
 
-async function loadAndRun(wasmUrl) {
+async function loadAndRunBytes(bytes) {
+  resetRuntimeState();
   const memory = new WebAssembly.Memory({ initial: 32, maximum: 256 });
   const imports = buildImports(memory);
   imports.env.memory = memory;
 
-  const response = await fetch(wasmUrl);
-  const bytes = await response.arrayBuffer();
   const { instance } = await WebAssembly.instantiate(bytes, imports);
 
   // Use WASM's own memory if exported
@@ -646,5 +804,11 @@ async function loadAndRun(wasmUrl) {
     console.error("[gbasic] Error:", e);
     appendOutput("ERROR: " + e.message + "\n");
   }
+}
+
+async function loadAndRun(wasmUrl) {
+  const response = await fetch(wasmUrl);
+  const bytes = await response.arrayBuffer();
+  return loadAndRunBytes(bytes);
 }
 "##;

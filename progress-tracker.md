@@ -8,12 +8,43 @@
 
 | Field | Value |
 |-------|-------|
-| current_day | 1 |
+| current_day | 2 |
 | current_phase | day_done |
 | gate_status | awaiting_review |
-| last_pr | #5 (Day 1 — awaiting Chibueze) |
-| last_tick | 2026-05-09 — PR #5 CI now green (both ubuntu + macos); idle until merge |
+| last_pr | #6 (Day 2 — awaiting Chibueze) |
+| last_tick | 2026-05-15 — Day 2 corrected: web runtime sprite + sound plus real playground iframe execution |
 | blocker | — |
+
+**Day 2 — done:**
+- `runtime_screen_sprite_load` (web): async fetch with `.png` / `.jpg` / `.jpeg` candidates from `assets/sprites/<name>`; cached by handle index in `state.sprites[]`; drawing before load completes is a silent no-op
+- `runtime_screen_sprite_at` / `_scale`: sprite property mutation, returns handle for chaining
+- `runtime_screen_sprite_draw`: `ctx.drawImage(image, x, y, w*scale, h*scale)`; respects `ready` flag
+- `runtime_sound_effect_load` (web): pre-warms `state.soundCache` (Map<name, AudioBuffer>) via fetch + `decodeAudioData`; tries `.wav` / `.mp3` / `.ogg`
+- `runtime_sound_effect_play` (web): plays buffered sound through a per-call `GainNode`; lazy `AudioContext.resume()` for autoplay-policy safety
+- `runtime_sound_effect_volume` (web): name-keyed `state.soundVolumes` map applied at play time
+- `state.assetSpriteRoot` / `assetSoundRoot` are host-overridable so the playground can point to its own asset dir
+- `loadAndRunBytes(wasmBytes)` runtime entrypoint added so the playground can execute compile-service responses without writing a temporary `.wasm` URL
+- Playground Run now mounts each compiled program in a fresh sandboxed iframe and calls the returned runtime + WASM bundle immediately
+- Playground Stop removes the iframe, which tears down the running WASM instance, animation loop, and audio context
+- The stale "runtime wiring lands Day 4" placeholder was removed; Day 4 can build lessons on top of the same sandbox runner
+
+`cargo check -p gbasic-irgen --no-default-features` clean.
+
+**Day 2 afternoon (morning+afternoon folded — natural single change):**
+- Sound (load/play/volume) was the afternoon's main work — landed alongside sprite in the same edit because both share the same `state` extensions and helper-fn pattern
+- `web_parity.rs` already passing (the names were on the declared list pre-existing; only the bodies changed)
+- BMP-only restriction was desktop-side only; web now supports PNG/JPG/JPEG with extension probing
+- `IO.read_file` web stub intentionally left returning empty
+
+**Playground execution wiring (Day 1 carryover):**
+- Completed in Day 2 correction. The playground now executes compile-service bundles in a per-run iframe sandbox.
+
+**Day 3 — next:**
+- Curate 15 Kenney CC0 sprites + 10 sounds; drop into `assets/{sprites,sounds}/`
+- `assets/manifest.json` for name → file resolution
+- `assets/CREDITS.md` per-asset attribution
+- Wire `Asset.Sprite(name)` / `Asset.Sound(name)` through both desktop and web codegen+runtime
+- Asset picker panel in playground
 
 **Day 1 — done:**
 - `playground/` static site (Monaco + canvas + Run/Stop/Share)

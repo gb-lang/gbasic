@@ -8,12 +8,27 @@
 
 | Field | Value |
 |-------|-------|
-| current_day | 6 |
+| current_day | 7 |
 | current_phase | day_done |
 | gate_status | awaiting_review |
-| last_pr | pending (Day 6 — polish + deploy readiness) |
-| last_tick | 2026-05-15 — Day 6: welcome band, errors/loading, telemetry, rate limit |
+| last_pr | pending (Day 7 — launch handoff) |
+| last_tick | 2026-05-15 — Day 7: launch runbook, QA checklist, handoff notes |
 | blocker | — |
+
+**Day 7 — done:**
+- Added `LAUNCH.md` with pre-launch, smoke, browser QA, deploy, rollback, hotfix, tag, and feedback-loop instructions
+- Added `playground/QA.md` for manual lesson/runtime/browser checks
+- Added `docs/kids-launch-handoff.md` for Chibueze handoff and follow-up decisions
+- Documented `v0.3.0-kids` tag procedure
+- Documented first 24h soft-launch feedback loop
+
+**Kids-launch PR stack:**
+- Day 2 corrected runtime execution: PR #6
+- Day 3 assets: PR #8
+- Day 4 lessons: PR #9
+- Day 5 sharing/smoke checks: PR #10
+- Day 6 polish/deploy guardrails: PR #11
+- Day 7 launch handoff: pending
 
 **Day 6 — done:**
 - Added compact welcome band with Start Learning link and example preview chips
@@ -24,10 +39,6 @@
 - Added client telemetry for compile success/failure and lesson completion
 - Added compile-service rate limit: 10 compile requests/minute/IP
 - Updated README and compile-service docs with playground/deploy-readiness notes
-
-**Day 7 — next:**
-- Launch checklist, ops handoff, rollback/hotfix notes
-- Browser/Chromebook/manual QA checklist and v0.3.0-kids tag instructions
 
 **Day 5 — done:**
 - Share button now encodes the editor program into the URL hash as `#code=...&title=...`

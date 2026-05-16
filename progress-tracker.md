@@ -8,12 +8,37 @@
 
 | Field | Value |
 |-------|-------|
-| current_day | 5 |
+| current_day | 7 |
 | current_phase | day_done |
 | gate_status | awaiting_review |
-| last_pr | pending (Day 5 — sharing + smoke tests) |
-| last_tick | 2026-05-15 — Day 5: share URLs, canonical game checks, lesson fixture checks |
+| last_pr | pending (Day 7 — launch handoff) |
+| last_tick | 2026-05-15 — Day 7: launch runbook, QA checklist, handoff notes |
 | blocker | — |
+
+**Day 7 — done:**
+- Added `LAUNCH.md` with pre-launch, smoke, browser QA, deploy, rollback, hotfix, tag, and feedback-loop instructions
+- Added `playground/QA.md` for manual lesson/runtime/browser checks
+- Added `docs/kids-launch-handoff.md` for Chibueze handoff and follow-up decisions
+- Documented `v0.3.0-kids` tag procedure
+- Documented first 24h soft-launch feedback loop
+
+**Kids-launch PR stack:**
+- Day 2 corrected runtime execution: PR #6
+- Day 3 assets: PR #8
+- Day 4 lessons: PR #9
+- Day 5 sharing/smoke checks: PR #10
+- Day 6 polish/deploy guardrails: PR #11
+- Day 7 launch handoff: pending
+
+**Day 6 — done:**
+- Added compact welcome band with Start Learning link and example preview chips
+- Added inline compiler error panel above the editor
+- Added visible Run button loading state while compiling
+- Refined mobile fallback behavior around the new welcome band/header
+- Added anonymous `POST /telemetry` endpoint to the compile service
+- Added client telemetry for compile success/failure and lesson completion
+- Added compile-service rate limit: 10 compile requests/minute/IP
+- Updated README and compile-service docs with playground/deploy-readiness notes
 
 **Day 5 — done:**
 - Share button now encodes the editor program into the URL hash as `#code=...&title=...`
@@ -22,11 +47,6 @@
 - Optional title prompt included in the share URL
 - Added `compiler/cli/tests/canonical_games.rs` to type-check `pong.gb`, `flappy.gb`, and `angrybirds.gb`
 - Added `compiler/cli/tests/lesson_fixtures.rs` to type-check all six starter/solution lesson programs
-
-**Day 6 — next:**
-- Landing polish, inline compiler errors, loading states, mobile fallback refinement
-- Anonymous telemetry endpoint and compile-service rate limiting
-- README hosted-playground placement and deployment notes
 
 **Day 4 — done:**
 - Added six lesson markdown files under `playground/lessons/`

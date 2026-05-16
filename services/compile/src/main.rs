@@ -12,13 +12,16 @@
 //!   - 5 MB output ceiling
 //!   - per-request `TempDir`, dropped after response
 
+use std::collections::{HashMap, VecDeque};
+use std::net::SocketAddr;
 use std::path::Path;
 use std::process::Stdio;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use axum::{
     Router,
-    extract::DefaultBodyLimit,
+    extract::{ConnectInfo, DefaultBodyLimit, State},
     http::StatusCode,
     response::Json,
     routing::{get, post},
@@ -33,6 +36,21 @@ use tower_http::cors::{Any, CorsLayer};
 const MAX_SOURCE_BYTES: usize = 1024 * 1024;
 const MAX_OUTPUT_BYTES: u64 = 5 * 1024 * 1024;
 const COMPILE_TIMEOUT: Duration = Duration::from_secs(5);
+const RATE_LIMIT_WINDOW: Duration = Duration::from_secs(60);
+const RATE_LIMIT_MAX: usize = 10;
+
+#[derive(Clone, Default)]
+struct AppState {
+    rate_limits: Arc<Mutex<HashMap<String, VecDeque<std::time::Instant>>>>,
+    telemetry: Arc<Mutex<TelemetryCounts>>,
+}
+
+#[derive(Default)]
+struct TelemetryCounts {
+    compile_succeeded: u64,
+    compile_failed: u64,
+    lesson_completed: u64,
+}
 
 fn gbasic_bin() -> String {
     std::env::var("GBASIC_BIN").unwrap_or_else(|_| "gbasic".to_string())
@@ -41,6 +59,11 @@ fn gbasic_bin() -> String {
 #[derive(Deserialize)]
 struct CompileRequest {
     source: String,
+}
+
+#[derive(Deserialize)]
+struct TelemetryRequest {
+    event: String,
 }
 
 #[derive(Serialize, Default)]
@@ -69,11 +92,14 @@ async fn main() {
         .allow_methods(Any)
         .allow_headers(Any);
 
+    let state = AppState::default();
     let app = Router::new()
         .route("/healthz", get(|| async { "ok" }))
         .route("/compile", post(compile))
+        .route("/telemetry", post(telemetry))
         .layer(DefaultBodyLimit::max(MAX_SOURCE_BYTES + 4096))
-        .layer(cors);
+        .layer(cors)
+        .with_state(state);
 
     let port: u16 = std::env::var("PORT")
         .ok()
@@ -82,10 +108,26 @@ async fn main() {
     let addr = format!("0.0.0.0:{port}");
     let listener = tokio::net::TcpListener::bind(&addr).await.expect("bind");
     tracing::info!(%addr, "compile-service listening");
-    axum::serve(listener, app).await.expect("serve");
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .await
+    .expect("serve");
 }
 
-async fn compile(Json(req): Json<CompileRequest>) -> (StatusCode, Json<CompileResponse>) {
+async fn compile(
+    State(state): State<AppState>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    Json(req): Json<CompileRequest>,
+) -> (StatusCode, Json<CompileResponse>) {
+    if !allow_request(&state, addr.ip().to_string()) {
+        return error(
+            StatusCode::TOO_MANY_REQUESTS,
+            "rate limit exceeded (10 compiles/min)",
+        );
+    }
+
     if req.source.len() > MAX_SOURCE_BYTES {
         return error(StatusCode::PAYLOAD_TOO_LARGE, "source exceeds 1MB limit");
     }
@@ -194,4 +236,38 @@ fn error(status: StatusCode, msg: &str) -> (StatusCode, Json<CompileResponse>) {
             ..Default::default()
         }),
     )
+}
+
+async fn telemetry(
+    State(state): State<AppState>,
+    Json(req): Json<TelemetryRequest>,
+) -> (StatusCode, &'static str) {
+    if let Ok(mut counts) = state.telemetry.lock() {
+        match req.event.as_str() {
+            "compile_succeeded" => counts.compile_succeeded += 1,
+            "compile_failed" => counts.compile_failed += 1,
+            "lesson_completed" => counts.lesson_completed += 1,
+            _ => {}
+        }
+    }
+    (StatusCode::ACCEPTED, "ok")
+}
+
+fn allow_request(state: &AppState, key: String) -> bool {
+    let now = std::time::Instant::now();
+    let Ok(mut limits) = state.rate_limits.lock() else {
+        return true;
+    };
+    let hits = limits.entry(key).or_default();
+    while hits
+        .front()
+        .is_some_and(|t| now.duration_since(*t) > RATE_LIMIT_WINDOW)
+    {
+        hits.pop_front();
+    }
+    if hits.len() >= RATE_LIMIT_MAX {
+        return false;
+    }
+    hits.push_back(now);
+    true
 }

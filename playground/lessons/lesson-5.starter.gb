@@ -1,0 +1,10 @@
+let score = 0
+let star = sprite("star")
+
+while true {
+    clear(20, 20, 40)
+    Screen.SpriteAt(star, 360, 220)
+    Screen.SpriteScale(star, 2.0)
+    Screen.SpriteDraw(star)
+    print("Score: {score}").at(20, 30)
+}

@@ -38,11 +38,18 @@ Other errors (4xx/5xx):
 
 Returns `200 ok` for liveness probes.
 
+### `POST /telemetry`
+
+Anonymous event counter endpoint for playground metrics. The server accepts
+events such as `compile_succeeded`, `compile_failed`, and `lesson_completed`.
+It stores in-memory counters only; no PII, cookies, or user identifiers.
+
 ## Limits
 
 - Source: ≤ 1 MB
 - Output: ≤ 5 MB
 - Compile wall time: 5 s
+- Compile rate: 10 requests/minute/IP
 - Per-request `TempDir` is dropped on response
 
 ## Local dev

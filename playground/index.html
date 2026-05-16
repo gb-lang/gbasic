@@ -10,13 +10,44 @@
   <header>
     <div class="logo">G-Basic</div>
     <div class="actions">
+      <a id="learn-link" href="#/learn/1">Start Learning</a>
       <button id="run-btn" type="button">▶ Run</button>
       <button id="stop-btn" type="button" disabled>■ Stop</button>
       <button id="share-btn" type="button">⇪ Share</button>
     </div>
   </header>
+  <section id="welcome-band">
+    <div>
+      <strong>Make your first game in the browser.</strong>
+      <span>Write G-Basic, press Run, and share the result.</span>
+    </div>
+    <div class="preview-strip" aria-label="Example previews">
+      <span class="preview-card">Pong</span>
+      <span class="preview-card">Flappy</span>
+      <span class="preview-card">Sprites</span>
+    </div>
+  </section>
   <main>
     <section id="editor-pane">
+      <aside id="lesson-panel" aria-label="Lessons">
+        <div class="lesson-header">
+          <div>
+            <span id="lesson-kicker">Lesson 1 of 6</span>
+            <h1 id="lesson-title">Hello, screen</h1>
+          </div>
+          <div id="lesson-dots" aria-label="Lesson progress"></div>
+        </div>
+        <p id="lesson-goal"></p>
+        <div id="lesson-body"></div>
+        <div class="lesson-actions">
+          <button id="prev-lesson-btn" type="button">Prev</button>
+          <button id="load-starter-btn" type="button">Load starter</button>
+          <button id="show-solution-btn" type="button">Show solution</button>
+          <button id="complete-lesson-btn" type="button">Done</button>
+          <button id="next-lesson-btn" type="button">Next</button>
+        </div>
+      </aside>
+      <pre id="error-panel" aria-live="polite"></pre>
       <div id="editor"></div>
     </section>
     <section id="output-pane">
@@ -38,6 +69,7 @@
   </main>
   <div id="mobile-warning">Use a desktop or laptop for the best experience.</div>
   <script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs/loader.js"></script>
+  <script src="config.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

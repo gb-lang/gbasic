@@ -8,12 +8,54 @@
 
 | Field | Value |
 |-------|-------|
-| current_day | 3 |
+| current_day | 7 |
 | current_phase | day_done |
 | gate_status | awaiting_review |
-| last_pr | pending (Day 3 — asset library + Asset namespace) |
-| last_tick | 2026-05-15 — Day 3: CC0 starter assets, Asset.Sprite/Sound, asset picker |
+| last_pr | pending (Day 7 — launch handoff) |
+| last_tick | 2026-05-15 — Day 7: launch runbook, QA checklist, handoff notes |
 | blocker | — |
+
+**Day 7 — done:**
+- Added `LAUNCH.md` with pre-launch, smoke, browser QA, deploy, rollback, hotfix, tag, and feedback-loop instructions
+- Added `playground/QA.md` for manual lesson/runtime/browser checks
+- Added `docs/kids-launch-handoff.md` for Chibueze handoff and follow-up decisions
+- Documented `v0.3.0-kids` tag procedure
+- Documented first 24h soft-launch feedback loop
+
+**Kids-launch PR stack:**
+- Day 2 corrected runtime execution: PR #6
+- Day 3 assets: PR #8
+- Day 4 lessons: PR #9
+- Day 5 sharing/smoke checks: PR #10
+- Day 6 polish/deploy guardrails: PR #11
+- Day 7 launch handoff: pending
+
+**Day 6 — done:**
+- Added compact welcome band with Start Learning link and example preview chips
+- Added inline compiler error panel above the editor
+- Added visible Run button loading state while compiling
+- Refined mobile fallback behavior around the new welcome band/header
+- Added anonymous `POST /telemetry` endpoint to the compile service
+- Added client telemetry for compile success/failure and lesson completion
+- Added compile-service rate limit: 10 compile requests/minute/IP
+- Updated README and compile-service docs with playground/deploy-readiness notes
+
+**Day 5 — done:**
+- Share button now encodes the editor program into the URL hash as `#code=...&title=...`
+- Shared URLs load back into the editor on page open
+- Share flow supports non-ASCII source via `TextEncoder`/`TextDecoder`
+- Optional title prompt included in the share URL
+- Added `compiler/cli/tests/canonical_games.rs` to type-check `pong.gb`, `flappy.gb`, and `angrybirds.gb`
+- Added `compiler/cli/tests/lesson_fixtures.rs` to type-check all six starter/solution lesson programs
+
+**Day 4 — done:**
+- Added six lesson markdown files under `playground/lessons/`
+- Added starter and solution `.gb` fixtures for each lesson
+- Added `playground/lessons/manifest.json`
+- Playground now has a lesson panel with title, goal, progress dots, Prev/Next, Load starter, Show solution, and Done actions
+- Supports `#/learn/N` hash routes and also recognizes `/learn/N` when hosted with a fallback
+- Lesson completion is stored locally in `localStorage`
+- Lesson code loads directly into the Monaco editor
 
 **Day 3 — done:**
 - Added a CC0 starter asset pack with 15 generated sprites and 10 generated sound effects
@@ -26,11 +68,6 @@
 - Desktop runtime resolves simple sprite/sound names against bundled `assets/` fallbacks
 - Playground asset picker loads the manifest and inserts `sprite("hero")` / `play("jump")` snippets
 - `examples/sprite_demo.gb` and `examples/sound_demo.gb` now use bundled name-based assets
-
-**Day 4 — next:**
-- Add 6 in-playground lessons from hello screen to first game
-- Lesson runner UI, starter/solution loading, `/learn/N` routes, local completion state
-- Add lesson smoke-test fixtures
 
 **Day 2 — done:**
 - `runtime_screen_sprite_load` (web): async fetch with `.png` / `.jpg` / `.jpeg` candidates from `assets/sprites/<name>`; cached by handle index in `state.sprites[]`; drawing before load completes is a silent no-op

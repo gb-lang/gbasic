@@ -2,7 +2,7 @@
 
 A compiled programming language designed for kids aged 7-12 to learn programming through game creation. G-Basic compiles to native binaries via LLVM, with built-in support for 2D graphics, sound, and input handling.
 
-> Browser playground: serve `playground/` locally today; replace this note with the hosted URL when DNS is chosen.
+> Browser playground: https://gb-lang.github.io/gbasic/
 
 ## Project Status
 

@@ -58,7 +58,7 @@ Requires the `gbasic` binary on `PATH` (or pointed at via `GBASIC_BIN`).
 
 ```sh
 # Build the gbasic compiler with LLVM (one-time, slow)
-cargo build --release -p gbasic --features llvm
+cargo build --release -p gbasic
 export GBASIC_BIN="$(pwd)/target/release/gbasic"
 
 # Run the service
@@ -85,5 +85,41 @@ docker run -p 8080:8080 gbasic-compile-service
 
 ## Deploy targets
 
-Hosting decision is deferred to Day 6 (Chibueze chooses between Fly.io
-and Cloudflare Containers). The Dockerfile works on either.
+The service currently deploys to Google Cloud Run from the Dockerfile:
+
+```sh
+IMAGE=us-central1-docker.pkg.dev/gbasic-compile-sg3/gbasic/compile-service:latest
+gcloud builds submit \
+  --project gbasic-compile-sg3 \
+  --config deploy/cloudbuild.compile.yaml \
+  --substitutions _IMAGE="$IMAGE" \
+  .
+
+gcloud run deploy gbasic-compile \
+  --project gbasic-compile-sg3 \
+  --region us-central1 \
+  --image "$IMAGE" \
+  --platform managed \
+  --allow-unauthenticated \
+  --port 8080 \
+  --memory 1Gi \
+  --cpu 1 \
+  --concurrency 4 \
+  --timeout 15s \
+  --min-instances 0 \
+  --max-instances 1 \
+  --set-env-vars RUST_LOG=info,GBASIC_BIN=/usr/local/bin/gbasic
+```
+
+After deploying, point the GitHub Pages playground at Cloud Run:
+
+```sh
+SERVICE_URL="$(gcloud run services describe gbasic-compile \
+  --project gbasic-compile-sg3 \
+  --region us-central1 \
+  --format='value(status.url)')"
+
+gh variable set GBASIC_COMPILE_URL --repo gb-lang/gbasic --body "$SERVICE_URL/compile"
+gh variable set GBASIC_TELEMETRY_URL --repo gb-lang/gbasic --body "$SERVICE_URL/telemetry"
+gh workflow run "Playground Pages" --repo gb-lang/gbasic --ref main
+```

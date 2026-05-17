@@ -43,7 +43,7 @@ See [Building on Windows](#building-on-windows) below for full instructions.
 
 ```bash
 # Build the compiler (requires LLVM)
-cargo build -p gbasic --features llvm
+cargo build -p gbasic
 
 # Build the desktop runtime (SDL2 builds from source via bundled feature)
 cargo build -p gbasic-runtime-desktop

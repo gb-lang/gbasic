@@ -6,6 +6,14 @@
 
 FROM rust:1.83-bookworm AS builder
 
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    gnupg \
+    wget \
+    && wget -qO /etc/apt/trusted.gpg.d/apt.llvm.org.asc https://apt.llvm.org/llvm-snapshot.gpg.key \
+    && echo "deb http://apt.llvm.org/bookworm/ llvm-toolchain-bookworm-18 main" > /etc/apt/sources.list.d/llvm.list \
+    && rm -rf /var/lib/apt/lists/*
+
 # LLVM 18 (needed by inkwell) + wasm-ld + wasm-opt + cmake (for SDL2 build,
 # even though desktop runtime is unused at runtime, the compiler crate
 # pulls in workspace deps).
@@ -25,10 +33,18 @@ ENV LLVM_SYS_180_PREFIX=/usr/lib/llvm-18
 WORKDIR /build
 COPY . .
 
-RUN cargo build --release -p gbasic --features llvm \
+RUN cargo build --release -p gbasic \
  && cargo build --release -p gbasic-compile-service
 
 FROM debian:bookworm-slim AS runtime
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    gnupg \
+    wget \
+    && wget -qO /etc/apt/trusted.gpg.d/apt.llvm.org.asc https://apt.llvm.org/llvm-snapshot.gpg.key \
+    && echo "deb http://apt.llvm.org/bookworm/ llvm-toolchain-bookworm-18 main" > /etc/apt/sources.list.d/llvm.list \
+    && rm -rf /var/lib/apt/lists/*
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     llvm-18 \
